@@ -54,49 +54,59 @@
 
 ---
 
-### 2. บอร์ด 1: Battery Master (IP 192.168.8.108)
-ทำหน้าที่อ่านข้อมูล Modbus จากแบตเตอรี่ทั้ง 4 ลูก
+---
 
-#### A. โมดูลที่ 1 (บอร์ดน้ำเงิน Isolated) สำหรับ Pack 1, 2, 3 (Slave IDs: 214, 215, 216)
-* **ESP32 TX:** `GPIO 33` (Header H1 Pin 8) $\rightarrow$ โมดูล RXD
-* **ESP32 RX:** `GPIO 32` (Header H1 Pin 3) $\rightarrow$ โมดูล TXD
-* **ไฟเลี้ยง:** VCC 5V (H1 Pin 22/24), GND (H1 Pin 19)
-* **ฝั่งต่อแบตเตอรี่ (RJ45):**
-  * **RS485 A+ :** Pin 2 (สายส้ม)
-  * **RS485 B- :** Pin 1 (สายขาว-ส้ม)
+### 2. ตารางสรุป GPIO และ Pinout เชื่อมต่อ TTL โมดูลทั้งหมด (Complete Pinout Table)
 
-#### B. โมดูลที่ 2 (บอร์ดแดง/น้ำเงิน Isolated) สำหรับ Pack 4 (Slave ID: 214 แยกบัส)
-*เหตุผลที่ต้องแยกบัส:* แบตลูกที่ 4 มี Address ID 214 ชนกับลูกที่ 1 โดยไม่ต้องไปยุ่งกับ DIP switch
-* **ESP32 TX:** `GPIO 18` (Header H1 Pin 1) $\rightarrow$ โมดูล RXD
-* **ESP32 RX:** `GPIO 25` (Header H1 Pin 4) $\rightarrow$ โมดูล TXD
-* **ไฟเลี้ยง:** VCC 5V (H1 Pin 22/24), GND (H1 Pin 23)
-* **ฝั่งต่อแบตเตอรี่ (RJ45):**
-  * **RS485 A+ :** Pin 2 (สายส้ม)
-  * **RS485 B- :** Pin 1 (สายขาว-ส้ม)
-  * **RS485 GND :** Pin 3/6 (สายขาว-เขียว) $\rightarrow$ **ต่อเข้าขั้ว GND ฝั่ง Isolated ของโมดูล (หัวใจสำคัญแก้กราวด์ลูป)**
+| บอร์ด | ชุดเชื่อมต่อ | ขาบนบอร์ด T-CAN485 (Header Pin) | ขาบนโมดูล TTL-RS485 | ฝั่ง RJ45 / ปลายทาง | หมายเหตุ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Board 1** | **โมดูล 1: Pack 1–3** | **GPIO 33** (Header H1 Pin 8)<br>**GPIO 32** (Header H1 Pin 3)<br>**5V** (H1 Pin 22/24)<br>**GND** (H1 Pin 19) | **RXD**<br>**TXD**<br>**VCC**<br>**GND** | RJ45 Pin 2 (ส้ม = A+)<br>RJ45 Pin 1 (ขาวส้ม = B-) | บัสหลักแบตเตอรี่ (Slave IDs: 214, 215, 216) |
+| **Board 1** | **โมดูล 2: Pack 4** | **GPIO 18** (Header H1 Pin 1)<br>**GPIO 25** (Header H1 Pin 4)<br>**5V** (H1 Pin 22/24)<br>**GND** (H1 Pin 23) | **RXD**<br>**TXD**<br>**VCC**<br>**GND**<br>*Isolated GND* | RJ45 Pin 2 (ส้ม = A+)<br>RJ45 Pin 1 (ขาวส้ม = B-)<br>**RJ45 Pin 3/6 (ขาวเขียว)** | บัสแยก Pack 4 (ID 214 ชนกับลูกที่ 1)<br>***RJ45 Pin 3/6 ต่อเข้า Isolated GND แก้กราวด์ลูป*** |
+| **Board 1 <-> 2** | **CAN Interconnect** | **GPIO 27** (TX Onboard)<br>**GPIO 26** (RX Onboard)<br>**GND** (Terminal บอร์ด) | ขั้ว **CAN_H** (ขันน็อต)<br>ขั้ว **CAN_L** (ขันน็อต)<br>ขั้ว **G** (ขันน็อต) | สาย LAN ขาวส้ม+ส้ม<br>สาย LAN ขาวน้ำเงิน+น้ำเงิน<br>สาย LAN ขาวเขียว+เขียว | สื่อสารระหว่าง 2 บอร์ดความเร็ว 500kbps |
+| **Board 2** | **โมดูล Inverter** | **GPIO 33** (Header H1 Pin 8)<br>**GPIO 32** (Header H1 Pin 3)<br>**5V** (H1 Pin 22/24)<br>**GND** (H1 Pin 19) | **RXD**<br>**TXD**<br>**VCC**<br>**GND**<br>*Isolated GND* | พอร์ต BMS Inverter A+<br>พอร์ต BMS Inverter B-<br>พอร์ต BMS Inverter GND | จำลอง Pylontech Protocol ส่งให้อินเวอร์เตอร์ |
 
 ---
 
-### 3. การเชื่อมต่อ CAN Bus ระหว่าง Board 1 และ Board 2
-เชื่อมโยงสื่อสารความเร็ว 500kbps ข้ามบอร์ดผ่านสาย LAN แบบรวบคู่ (Double Twisted-Pair):
-* **[ขาวส้ม + ส้ม]** รวมกัน $\rightarrow$ ขันเข้าช่อง **`CAN_H`** (Board 1 ไป Board 2)
-* **[ขาวน้ำเงิน + น้ำเงิน]** รวมกัน $\rightarrow$ ขันเข้าช่อง **`CAN_L`** (Board 1 ไป Board 2)
-* **[ขาวเขียว + เขียว]** รวมกัน $\rightarrow$ ขันเข้าช่อง **`G` (GND)** (ดึงระดับกราวด์อ้างอิงเท่ากัน)
-* *(คู่น้ำตาลเก็บสำรองไว้)*
+### 3. รายละเอียดการต่อสายแต่ละชุด (Detailed Wiring per Module)
 
----
+#### ชุดที่ 1: บอร์ด 1 ต่อเข้าโมดูล Isolated สำหรับ Pack 1, 2, 3 (Slave IDs: 214, 215, 216)
+* **ฝั่งลอจิก TTL (เข้า ESP32 T-CAN485):**
+  * `RXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 33`** (Header H1 Pin 8)
+  * `TXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 32`** (Header H1 Pin 3)
+  * `VCC` ของโมดูล $\rightarrow$ ต่อเข้า **`5V`** (Header H1 Pin 22 หรือ 24)
+  * `GND` ของโมดูล $\rightarrow$ ต่อเข้า **`GND`** (Header H1 Pin 19)
+* **ฝั่งบัส RS485 (เข้าหัว RJ45 แบตเตอรี่ลูกที่ 1, 2, 3):**
+  * **A+** $\rightarrow$ ต่อสายสีส้ม (RJ45 Pin 2)
+  * **B-** $\rightarrow$ ต่อสายสีขาว-ส้ม (RJ45 Pin 1)
 
-### 4. บอร์ด 2: Inverter Gateway & Logger (IP 192.168.8.109 - Project V2)
-ทำหน้าที่รับข้อมูลจาก CAN Bus แล้วแปลงเป็น Pylontech RS485 ส่งให้อินเวอร์เตอร์
+#### ชุดที่ 2: บอร์ด 1 ต่อเข้าโมดูล Isolated สำหรับ Pack 4 (Slave ID: 214 บัสแยก)
+*เหตุผลที่ต้องแยกบัส:* แบตลูกที่ 4 มี Address ID 214 ซ้ำกับลูกที่ 1 โดยเราไม่ต้องไปปรับสวิตช์ DIP ที่ตัวแบต
+* **ฝั่งลอจิก TTL (เข้า ESP32 T-CAN485):**
+  * `RXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 18`** (Header H1 Pin 1)
+  * `TXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 25`** (Header H1 Pin 4)
+  * `VCC` ของโมดูล $\rightarrow$ ต่อเข้า **`5V`** (Header H1 Pin 22 หรือ 24)
+  * `GND` ของโมดูล $\rightarrow$ ต่อเข้า **`GND`** (Header H1 Pin 23)
+* **ฝั่งบัส RS485 (เข้าหัว RJ45 แบตเตอรี่ลูกที่ 4):**
+  * **A+** $\rightarrow$ ต่อสายสีส้ม (RJ45 Pin 2)
+  * **B-** $\rightarrow$ ต่อสายสีขาว-ส้ม (RJ45 Pin 1)
+  * **GND (Isolated):** ต่อสายสีขาว-เขียว (RJ45 Pin 3 หรือ Pin 6) $\rightarrow$ **เข้าช่อง GND ฝั่ง RS485 ของโมดูล (หัวใจสำคัญแก้ Common-Mode)**
 
-#### A. พอร์ต Pylontech RS485 ไปยังอินเวอร์เตอร์ (BMS Port)
-* ใช้ **โมดูลสีน้ำเงินที่มี Isolated** (ป้องกัน High Common-Mode Voltage จากอินเวอร์เตอร์)
-* **ESP32 TX:** `GPIO 33` $\rightarrow$ โมดูล RXD
-* **ESP32 RX:** `GPIO 32` $\rightarrow$ โมดูล TXD
-* **ฝั่งต่อ Inverter (RJ45 BMS Port):**
-  * **RS485 A+ :** ต่อเข้าขา RS485-A ของ Inverter (ตามสเปก RJ45 ของแต่ละยี่ห้อ เช่น Pin 1 หรือ Pin 7)
-  * **RS485 B- :** ต่อเข้าขา RS485-B ของ Inverter (เช่น Pin 2 หรือ Pin 8)
-  * **RS485 GND :** ต่อขา GND ของพอร์ต BMS Inverter เข้ากับ GND ฝั่ง Isolated ของโมดูลน้ำเงิน
+#### ชุดที่ 3: การเชื่อมต่อ CAN Bus ข้ามบอร์ด (Board 1 <-> Board 2)
+* เชื่อมโยงผ่านช่องขันน็อตเทอร์มินอลสีเขียว (CAN Port Onboard ที่ควบคุมด้วย GPIO 27/26):
+  * **`CAN_H`** (Board 1) $\leftrightarrow$ **`CAN_H`** (Board 2) ด้วยสาย **ขาวส้ม + ส้ม**
+  * **`CAN_L`** (Board 1) $\leftrightarrow$ **`CAN_L`** (Board 2) ด้วยสาย **ขาวน้ำเงิน + น้ำเงิน**
+  * **`G` (GND)** (Board 1) $\leftrightarrow$ **`G` (GND)** (Board 2) ด้วยสาย **ขาวเขียว + เขียว**
+
+#### ชุดที่ 4: บอร์ด 2 ต่อเข้าโมดูล Isolated สำหรับเชื่อมต่อไปยัง Inverter (BMS Port)
+* **ฝั่งลอจิก TTL (เข้า ESP32 T-CAN485 บอร์ดที่ 2):**
+  * `RXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 33`** (Header H1 Pin 8)
+  * `TXD` ของโมดูล $\rightarrow$ ต่อเข้า **`GPIO 32`** (Header H1 Pin 3)
+  * `VCC` ของโมดูล $\rightarrow$ ต่อเข้า **`5V`** (Header H1 Pin 22/24)
+  * `GND` ของโมดูล $\rightarrow$ ต่อเข้า **`GND`** (Header H1 Pin 19)
+* **ฝั่งบัส RS485 (เข้าช่อง RJ45 พอร์ต BMS ของ Inverter):**
+  * **A+** $\rightarrow$ ต่อขา RS485-A ของ Inverter (สเปกแต่ละรุ่น เช่น Pin 1 หรือ Pin 7)
+  * **B-** $\rightarrow$ ต่อขา RS485-B ของ Inverter (เช่น Pin 2 หรือ Pin 8)
+  * **GND (Isolated):** ต่อขากราวด์ของพอร์ต BMS อินเวอร์เตอร์ เข้ากับช่อง GND ฝั่ง RS485 ของโมดูลน้ำเงิน
 
 #### B. พอร์ต MicroSD Card Onboard
 * ทำงานผ่านสล็อต TF Card บนบอร์ด T-CAN485 เพื่อบันทึก CSV Log และดาวน์โหลดผ่าน Web Port 8080
