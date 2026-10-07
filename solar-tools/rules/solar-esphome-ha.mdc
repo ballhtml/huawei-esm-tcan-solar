@@ -1,0 +1,34 @@
+---
+description: Coding standards and safety rules for ESPHome Modbus, CAN Bus, and Home Assistant solar battery configurations.
+alwaysApply: true
+globs: ["**/*.yaml", "**/*.yml", "**/components*/**/*.h", "**/components*/**/*.cpp"]
+---
+
+# Solar & Battery System Rules (ESPHome & Home Assistant)
+
+Guidelines and constraints for managing ESPHome Modbus/CAN solar battery nodes and Home Assistant dashboards.
+
+## 1. Safety & Hardware Integrity
+- **Galvanic Isolation:** All battery RS485 and Inverter RS485 lines MUST route through Galvanically Isolated modules with signal ground references (e.g. RJ45 Pin 3/6 to Module GND). Never route raw unisolated RS485 lines directly from ESP32 to high-power battery/inverter buses.
+- **Hardware Preservation:** Never instruct the user to alter DIP switches on active Huawei ESM packs.
+- **Multi-bus Isolation:** If identical Modbus slave IDs exist (such as ID 214 on Pack 1 and Pack 4), isolate them onto distinct UART/Modbus controller buses.
+
+## 2. ESPHome Configuration Standards
+- **UART Pullups:** Always enable `mode: INPUT_PULLUP` on RS485 RX pins to prevent floating signal artifacts during bus turnaround.
+- **Modbus Timing:**
+  - `send_wait_time`: Min 1500ms for Huawei ESM BMS.
+  - `turnaround_time`: 80ms - 250ms.
+  - Set custom frame delays (`frame_delay: 250ms`, `long_rx_buffer_delay: 350ms`) via lambda on boot for multi-pack arrays.
+- **Memory Management (Heap Crash Prevention):**
+  - Stagger Modbus polling using Time-Division Multiplexing (TDM) or non-overlapping intervals. Never poll all packs at the same interval.
+  - Avoid queuing excessive sensor updates simultaneously to prevent ESP-IDF `operator new` / Out of Memory panics.
+- **CAN Interconnect:**
+  - Standard TWAI bitrate: `500kbps` on pins GPIO 27 (TX) and GPIO 26 (RX).
+  - Use standard Pylontech frame mappings: `0x351` (Charge limits), `0x355` (SOC/SOH), `0x356` (V, I, T).
+
+## 3. Home Assistant Configuration Standards
+- **Entity Naming:** Use clear snake_case identifiers matching device name prefix (e.g. `sensor.huawei_esm_battery_system_total_battery_system_soc`).
+- **Dashboard Structure:**
+  - Present aggregate system power and SOC prominently at the top.
+  - Provide drill-down per-pack views with individual cell voltages (Cell 01 - Cell 15) and min/max temperatures.
+  - Use proper device classes (`voltage`, `current`, `power`, `battery`, `temperature`).

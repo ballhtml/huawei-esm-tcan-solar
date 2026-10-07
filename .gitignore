@@ -1,0 +1,31 @@
+# ESPHome Build & Cache
+.esphome/
+*.bin
+*.elf
+*.a
+*.o
+
+# Sensitive credentials
+secrets.yaml
+
+# Python cache & temp
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Large vendor dumps / zip / binaries
+*.zip
+*.tar.gz
+*.7z
+PbmsTools-485-XWDDC1.0.6/
+
+# Scratch & Logs
+*.log
+scratch/
+all_modbus_writes_anywhere.txt
+all_tool_calls_end.txt
+search_untruncated_logs.txt
+modbus_writes.txt
+write_log_analysis.txt
