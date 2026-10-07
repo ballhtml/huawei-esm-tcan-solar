@@ -5,6 +5,22 @@
 
 ระบบบริหารจัดการแบตเตอรี่ลิเธียมฟอสเฟต **Huawei ESM-48100B1** (48V 100Ah จำนวน 4–8 ลูก รวม 400–800Ah) ร่วมกับอินเวอร์เตอร์ไฮบริด/ออฟกริด และ Home Assistant โดยใช้บอร์ดไมโครคอนโทรลเลอร์ **LILYGO T-CAN485 (ESP32)** จำนวน 2 บอร์ดเชื่อมต่อกันด้วย **CAN Bus (TWAI 500kbps)**
 
+## 🧰 อุปกรณ์หลักในระบบ (Core Hardware Components)
+
+1. **บอร์ดควบคุมหลัก (Main Controller):**
+   * **LILYGO T-CAN485 (ESP32 CAN/RS485 Board):**
+     * ชิปประมวลผล Dual-Core ESP32 (Wi-Fi / Bluetooth / Native TWAI CAN)
+     * มี CAN Bus Transceiver ในตัว (ต่อใช้งานผ่าน `GPIO 26 / 27` ทำงานที่ความเร็วสูง 500kbps)
+     * ช่องต่อ MicroSD Card (TF Card) ในตัวสำหรับบันทึก Log ข้อมูลแบตเตอรี่แบบออฟไลน์
+     * ใช้งานทั้งหมด 2 บอร์ด (Board 1: Battery Master, Board 2: Inverter Bridge & Logger)
+
+2. **พระเอกกู้วิกฤตระบบ (The Hero Component):**
+   * **DC 3.3V/5V โมดูลแยกประเภทกัลวานิก TTL to RS485 (Isolated TTL to RS485 Module):**
+     * ชิปแยกสัญญาณและไฟเลี้ยงแบบกัลวานิกสมบูรณ์ (Galvanic Isolation 1.5kV+)
+     * รองรับฟังก์ชันควบคุมทิศทางข้อมูลอัตโนมัติ (Automatic Flow Control / Auto Direction) ไม่ต้องต่อขา DE/RE
+     * รองรับ Baudrate สูงสุดถึง **2 Mbps** (High Speed)
+     * **หน้าที่สำคัญ:** ตัดวงจรกราวด์ลูป (Ground Loop Isolation) ระหว่างแบตเตอรี่ อินเวอร์เตอร์ และ ESP32 100% ป้องกัน Common-Mode Voltage เกิน $\pm7\text{V}$ ไม่ให้ชิปตัดการทำงานตอนชาร์จกระแสสูงเกิน 60A / 3000W
+
 ---
 
 ## 🏗️ สถาปัตยกรรมของระบบ (System Architecture)
