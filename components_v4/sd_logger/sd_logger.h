@@ -24,6 +24,7 @@
 #include "lwip/netdb.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "tcan_telemetry_shared.h"
 
 namespace esphome {
 namespace sd_logger {
@@ -462,24 +463,164 @@ class SDLogger : public PollingComponent {
             lwip_send(client_fd, redirect, strlen(redirect), 0);
           } else {
             // Status landing page — stream HTML chunk-by-chunk to avoid buffer overflow
-            const char *hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+            const char *hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n";
             lwip_send(client_fd, hdr, strlen(hdr), 0);
 
             char chunk[1024];
+
+            // 1. HTML Head & CSS
             snprintf(chunk, sizeof(chunk),
-                     "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Huawei ESM SD Logger</title></head>"
-                     "<body style='font-family:sans-serif;padding:20px;max-width:650px;margin:auto;'>"
-                     "<h2>🔋 Huawei ESM-48100B1 SD Logger</h2>"
-                     "<p><b>Status:</b> %s</p>"
-                     "<p><b>Detail:</b> %s</p>"
-                     "<p><b>Current Time:</b> %s</p>"
-                     "<p><b>Policy:</b> Daily file rotation + Automatic 30-day retention cleanup</p>"
-                     "<hr>"
-                     "<h3>📁 Available Daily Logs (Last 30 Days)</h3>"
-                     "<ul>",
-                     mounted_ ? "✅ Mounted (FAT32 Active)" : "❌ Not Mounted",
-                     last_error_.c_str(),
-                     get_datetime_str().c_str());
+                     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                     "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
+                     "<meta http-equiv='refresh' content='5'>"
+                     "<title>Huawei ESM Real-Time Dashboard</title>"
+                     "<style>"
+                     "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:12px;background:#f4f6f9;color:#333}"
+                     ".container{max-width:850px;margin:auto}"
+                     ".card{background:#fff;border-radius:10px;padding:14px;margin-bottom:14px;box-shadow:0 2px 6px rgba(0,0,0,0.06)}"
+                     ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:10px}"
+                     ".stat{background:#f8f9fa;border-radius:8px;padding:8px 4px;text-align:center}"
+                     ".stat-val{font-size:18px;font-weight:bold;color:#1e3c72;margin-top:2px}"
+                     ".stat-lbl{font-size:11px;color:#6c757d}"
+                     "table{width:100%%;border-collapse:collapse;margin-top:8px;font-size:13px}"
+                     "th,td{padding:7px 4px;text-align:center;border-bottom:1px solid #e9ecef}"
+                     "th{background:#f1f3f5;font-weight:600;color:#495057}"
+                     "tr:hover{background:#f8f9fa}"
+                     ".badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:600}"
+                     ".badge-chg{background:#d4edda;color:#155724}"
+                     ".badge-dis{background:#fff3cd;color:#856404}"
+                     ".badge-sby{background:#e2e3e5;color:#383d41}"
+                     ".badge-off{background:#f8d7da;color:#721c24}"
+                     ".btn{display:inline-block;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:12px}"
+                     ".btn-green{background:#28a745;color:#fff}"
+                     ".btn-red{color:#dc3545}"
+                     ".btn-warn{color:#e0a800}"
+                     "</style></head><body><div class='container'>");
+            lwip_send(client_fd, chunk, strlen(chunk), 0);
+
+            // 2. Card 1: System Title & Live Stats
+            float total_v = get_val(voltage_sensor_);
+            float total_i = get_val(current_sensor_);
+            float total_w = get_val(power_sensor_);
+            float total_soc = get_val(soc_sensor_);
+            float max_t = get_val(temp_sensor_);
+            unsigned long inq = (unsigned long)get_val(inq_sensor_);
+            const char *i_col = (total_i > 0.5f) ? "#28a745" : ((total_i < -0.5f) ? "#fd7e14" : "#495057");
+
+            snprintf(chunk, sizeof(chunk),
+                     "<div class='card'>"
+                     "<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'>"
+                     "<h2 style='margin:0;font-size:18px;color:#1e3c72;'>🔋 Huawei ESM-48100B1 System</h2>"
+                     "<span style='font-size:11px;color:#28a745;font-weight:600;'>🟢 Live (Auto 5s)</span>"
+                     "</div>"
+                     "<p style='margin:4px 0 0 0;font-size:12px;color:#495057;'>"
+                     "<b>SD:</b> %s | <b>Time:</b> %s | <b>Li2 Queries:</b> %lu OK"
+                     "</p>"
+                     "<div class='grid'>"
+                     "<div class='stat'><div class='stat-lbl'>Total Voltage</div><div class='stat-val'>%.2f V</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Total Current</div><div class='stat-val' style='color:%s;'>%+.2f A</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Total Power</div><div class='stat-val'>%.0f W</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Total SOC</div><div class='stat-val'>%.0f %%</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Max Cell Temp</div><div class='stat-val'>%.0f &deg;C</div></div>"
+                     "</div></div>",
+                     mounted_ ? "✅ FAT32 Active" : "❌ Not Mounted",
+                     get_datetime_str().c_str(),
+                     inq,
+                     total_v, i_col, total_i, total_w, total_soc, max_t);
+            lwip_send(client_fd, chunk, strlen(chunk), 0);
+
+            // 3. Card 2: Real-Time Battery Packs Table
+            snprintf(chunk, sizeof(chunk),
+                     "<div class='card'>"
+                     "<h3 style='margin:0 0 4px 0;font-size:15px;color:#1e3c72;'>⚡ Real-Time Battery Load Sharing (8 Packs)</h3>"
+                     "<div style='overflow-x:auto;'>"
+                     "<table><thead><tr>"
+                     "<th>Pack</th><th>สถานะ</th><th>กระแส (A)</th><th>กำลัง (W)</th><th>แรงดัน (V)</th><th>SOC</th><th>Delta</th><th>Max Cell</th><th>Temp</th>"
+                     "</tr></thead><tbody>");
+            lwip_send(client_fd, chunk, strlen(chunk), 0);
+
+            bool direct_avail = is_tcan_direct_available();
+            for (int k = 0; k < 8; k++) {
+              int pack_no = k + 1;
+              bool online = false;
+              float pv = 0.0f;
+              float pi = 0.0f;
+              float psoc = 0.0f;
+              float pt = 0.0f;
+              int16_t delta = 0;
+              uint16_t max_cell_mv = 0;
+
+              if (direct_avail && g_tcan_direct_pkt.packs[k].is_online) {
+                online = true;
+                pv = g_tcan_direct_pkt.packs[k].voltage_x100 * 0.01f;
+                pi = g_tcan_direct_pkt.packs[k].current_x10 * 0.1f;
+                psoc = g_tcan_direct_pkt.packs[k].soc_x10 * 0.1f;
+                pt = g_tcan_direct_pkt.packs[k].temp_x10 * 0.1f;
+                delta = g_tcan_direct_pkt.packs[k].delta_mv;
+                for (int c = 0; c < 15; c++) {
+                  uint16_t cmv = g_tcan_direct_pkt.packs[k].cells_mv[c];
+                  if (cmv > 2000 && cmv < 4500 && cmv > max_cell_mv) {
+                    max_cell_mv = cmv;
+                  }
+                }
+              }
+
+              char row_buf[384];
+              if (online) {
+                const char *b_cls = "badge-sby";
+                const char *b_txt = "⚪ สแตนด์บาย";
+                const char *pi_col = "#495057";
+                if (pi >= 0.5f) {
+                  b_cls = "badge-chg";
+                  b_txt = "🟢 ชาร์จ";
+                  pi_col = "#28a745";
+                } else if (pi <= -0.5f) {
+                  b_cls = "badge-dis";
+                  b_txt = "🟠 จ่ายไฟ";
+                  pi_col = "#fd7e14";
+                }
+                const char *delta_col = "#28a745";
+                if (delta > 30) delta_col = "#dc3545";
+                else if (delta > 15) delta_col = "#fd7e14";
+
+                snprintf(row_buf, sizeof(row_buf),
+                         "<tr>"
+                         "<td><b>Pack %d</b></td>"
+                         "<td><span class='badge %s'>%s</span></td>"
+                         "<td style='font-weight:600;color:%s;'>%+.2f A</td>"
+                         "<td>%.0f W</td>"
+                         "<td>%.2f V</td>"
+                         "<td><b>%.0f%%</b></td>"
+                         "<td style='color:%s;'>%d mV</td>"
+                         "<td>%.3f V</td>"
+                         "<td>%.0f&deg;C</td>"
+                         "</tr>",
+                         pack_no, b_cls, b_txt, pi_col, pi,
+                         pv * pi, pv, psoc, delta_col, delta,
+                         max_cell_mv * 0.001f, pt);
+              } else {
+                snprintf(row_buf, sizeof(row_buf),
+                         "<tr style='color:#adb5bd;'>"
+                         "<td>Pack %d</td>"
+                         "<td><span class='badge badge-off'>🔴 ออฟไลน์</span></td>"
+                         "<td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td>"
+                         "</tr>",
+                         pack_no);
+              }
+              lwip_send(client_fd, row_buf, strlen(row_buf), 0);
+            }
+
+            const char *tbl_close = "</tbody></table></div></div>";
+            lwip_send(client_fd, tbl_close, strlen(tbl_close), 0);
+
+            // 4. Card 3: Daily SD Logs List
+            snprintf(chunk, sizeof(chunk),
+                     "<div class='card'>"
+                     "<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:8px;'>"
+                     "<h3 style='margin:0;font-size:15px;color:#1e3c72;'>📁 Daily SD Logs (Last 30 Days)</h3>"
+                     "<a href='/log.csv' class='btn btn-green'>⬇️ Download Today's Log</a>"
+                     "</div>"
+                     "<ul style='margin:0;padding-left:20px;font-size:12px;'>");
             lwip_send(client_fd, chunk, strlen(chunk), 0);
 
             bool found_file = false;
@@ -529,27 +670,11 @@ class SDLogger : public PollingComponent {
 
             snprintf(chunk, sizeof(chunk),
                      "</ul>"
-                     "<hr>"
-                     "<h3>📊 Live Telemetry</h3>"
-                     "<ul>"
-                     "<li><b>Total Voltage:</b> %.2f V</li>"
-                     "<li><b>Total Current:</b> %.2f A</li>"
-                     "<li><b>Total Power:</b> %.1f W</li>"
-                     "<li><b>Total SOC:</b> %.0f %%</li>"
-                     "<li><b>Max Cell Temp:</b> %.0f &deg;C</li>"
-                     "<li><b>Inverter Queries:</b> %lu</li>"
-                     "</ul>"
-                     "<hr>"
-                     "<p><a href='/log.csv' style='display:inline-block;padding:10px 20px;background:#28a745;color:white;text-decoration:none;border-radius:5px;'>⬇️ Download Today's Log</a></p>"
-                     "<p><a href='/clear' onclick='return confirm(\"Reset today log?\");' style='color:#dc3545;'>Reset Today's Log</a> &nbsp;|&nbsp; "
-                     "<a href='/format' onclick='return confirm(\"Re-format MicroSD Card to FAT32? All data will be deleted.\");' style='color:#e0a800;'>Re-format SD to FAT32</a></p>"
-                     "</body></html>",
-                     get_val(voltage_sensor_),
-                     get_val(current_sensor_),
-                     get_val(power_sensor_),
-                     get_val(soc_sensor_),
-                     get_val(temp_sensor_),
-                     (unsigned long)get_val(inq_sensor_));
+                     "<div style='margin-top:10px;font-size:12px;'>"
+                     "<a href='/clear' onclick='return confirm(\"Reset today log?\");' class='btn-red'>Reset Today's Log</a> &nbsp;|&nbsp; "
+                     "<a href='/format' onclick='return confirm(\"Re-format MicroSD Card to FAT32? All data will be deleted.\");' class='btn-warn'>Re-format SD to FAT32</a>"
+                     "</div></div>"
+                     "</div></body></html>");
             lwip_send(client_fd, chunk, strlen(chunk), 0);
           }
         }

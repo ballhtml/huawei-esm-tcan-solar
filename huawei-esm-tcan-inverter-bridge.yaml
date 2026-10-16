@@ -1,6 +1,6 @@
 # ==============================================================================
 # ESPHome Configuration for Board 2: LILYGO T-CAN485 (Inverter Bridge & Logger)
-# Version: 1.0.0 Enterprise (CAN Interconnect + Pylontech Emulator + SD Logger)
+# Version: 1.1.0 (Cell-Spike Protection + 8-Pack Real-Time Web Table)
 # ==============================================================================
 
 esphome:
@@ -181,6 +181,23 @@ interval:
               id(pylon_emu).ping_telemetry();
             }
           }
+
+          // Poll Direct UDP Telemetry (Port 5005 from Board 108)
+          poll_tcan_bms_receiver();
+
+          // Sync local Pack 8 telemetry into g_tcan_direct_pkt
+          float pv8 = id(pack8_battery_voltage).state;
+          float pi8 = id(pack8_current).state;
+          float psoc8 = id(pack8_soc).state;
+          float pt8 = id(pack8_max_cell_temp).state;
+          if (std::isfinite(pv8) && pv8 > 20.0f) {
+            g_tcan_direct_pkt.packs[7].is_online = 1;
+            g_tcan_direct_pkt.packs[7].voltage_x100 = (int16_t)(pv8 * 100.0f);
+            g_tcan_direct_pkt.packs[7].current_x10 = (int16_t)(pi8 * 10.0f);
+            g_tcan_direct_pkt.packs[7].soc_x10 = (int16_t)(psoc8 * 10.0f);
+            g_tcan_direct_pkt.packs[7].temp_x10 = std::isfinite(pt8) ? (int16_t)(pt8 * 10.0f) : 250;
+          }
+
           // Broadcast Li2 Inverter Bridge telemetry to CYD Display (192.168.8.110) every 1s
           static uint8_t cyd_bcast_div = 0;
           static uint8_t cyd_bcast_seq = 0;

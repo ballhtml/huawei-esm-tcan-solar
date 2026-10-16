@@ -4,6 +4,7 @@
 #include <string.h>
 #include <lwip/sockets.h>
 #include <fcntl.h>
+#include "esphome/core/hal.h"
 
 #define TCAN_TELEMETRY_PORT 5005
 #define TCAN_MAGIC 0x5443
@@ -106,13 +107,15 @@ inline BridgeTelemetryPacket g_bridge_direct_pkt;
 inline uint32_t g_bridge_last_recv_ms = 0;
 inline int g_cyd_bridge_rx_sock = -1;
 
-inline void poll_cyd_udp_receiver() {
-  // 1. Poll Board 108 (BMS 8-Pack Data on Port 5005)
+inline void poll_tcan_bms_receiver() {
+  // Poll Board 108 (BMS 8-Pack Data on Port 5005)
   if (g_cyd_udp_rx_sock < 0) {
     g_cyd_udp_rx_sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (g_cyd_udp_rx_sock >= 0) {
       int flags = fcntl(g_cyd_udp_rx_sock, F_GETFL, 0);
       fcntl(g_cyd_udp_rx_sock, F_SETFL, flags | O_NONBLOCK);
+      int opt = 1;
+      setsockopt(g_cyd_udp_rx_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
       struct sockaddr_in bind_addr;
       memset(&bind_addr, 0, sizeof(bind_addr));
       bind_addr.sin_family = AF_INET;
@@ -133,10 +136,15 @@ inline void poll_cyd_udp_receiver() {
       if (len <= 0) break;
       if (len == sizeof(TcanTelemetryPacket) && temp_pkt.magic == TCAN_MAGIC) {
         g_tcan_direct_pkt = temp_pkt;
-        g_tcan_last_recv_ms = millis();
+        g_tcan_last_recv_ms = esphome::millis();
       }
     }
   }
+}
+
+inline void poll_cyd_udp_receiver() {
+  // 1. Poll Board 108 (BMS 8-Pack Data on Port 5005)
+  poll_tcan_bms_receiver();
 
   // 2. Poll Board 109 (Li2 Inverter Bridge Data on Port 5006)
   if (g_cyd_bridge_rx_sock < 0) {
@@ -164,16 +172,16 @@ inline void poll_cyd_udp_receiver() {
       if (len <= 0) break;
       if (len == sizeof(BridgeTelemetryPacket) && b_pkt.magic == BRIDGE_MAGIC) {
         g_bridge_direct_pkt = b_pkt;
-        g_bridge_last_recv_ms = millis();
+        g_bridge_last_recv_ms = esphome::millis();
       }
     }
   }
 }
 
 inline bool is_tcan_direct_available() {
-  return (g_tcan_last_recv_ms > 0 && (millis() - g_tcan_last_recv_ms) < 6000);
+  return (g_tcan_last_recv_ms > 0 && (esphome::millis() - g_tcan_last_recv_ms) < 6000);
 }
 
 inline bool is_bridge_direct_available() {
-  return (g_bridge_last_recv_ms > 0 && (millis() - g_bridge_last_recv_ms) < 6000);
+  return (g_bridge_last_recv_ms > 0 && (esphome::millis() - g_bridge_last_recv_ms) < 6000);
 }

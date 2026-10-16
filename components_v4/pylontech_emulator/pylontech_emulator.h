@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include "tcan_telemetry_shared.h"
 
 namespace esphome {
 namespace pylontech_emulator {
@@ -140,6 +141,21 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     return true;
   }
 
+  uint16_t get_max_cell_voltage_mv() {
+    if (!is_tcan_direct_available()) return 0;
+    uint16_t max_mv = 0;
+    for (int p = 0; p < 8; p++) {
+      if (!g_tcan_direct_pkt.packs[p].is_online) continue;
+      for (int c = 0; c < 15; c++) {
+        uint16_t mv = g_tcan_direct_pkt.packs[p].cells_mv[c];
+        if (mv > 2000 && mv < 4500) {
+          if (mv > max_mv) max_mv = mv;
+        }
+      }
+    }
+    return max_mv;
+  }
+
   void update_protection_states() {
     if (!is_bms_data_fresh()) {
       charge_enabled_ = true;       // ALWAYS allow charging so solar/mains can wake up battery!
@@ -148,11 +164,12 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     }
     float soc = get_soc();
     float v = get_voltage();
+    uint16_t max_cell = get_max_cell_voltage_mv();
 
-    // 1. Overcharge Protection with Hysteresis (Max 53.6V, Float 53.0V for 15S)
-    if (v >= 53.6f || (soc >= 100.0f && v >= 53.3f)) {
+    // 1. Overcharge Protection with Hysteresis (Max 53.6V, Float 53.0V for 15S, or Cell >= 3.62V)
+    if (v >= 53.6f || (soc >= 100.0f && v >= 53.3f) || (max_cell >= 3620)) {
       charge_enabled_ = false;
-    } else if (!charge_enabled_ && v <= 53.0f && soc <= 98.0f) {
+    } else if (!charge_enabled_ && v <= 53.0f && soc <= 98.0f && (max_cell == 0 || max_cell <= 3450)) {
       charge_enabled_ = true;
     }
 
@@ -160,8 +177,8 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     // 48.0V = 3.20V/cell (Knee of LiFePO4). Cuts off before Huawei BMS enters sleep!
     if (soc <= 25.0f || v <= 48.0f) {
       discharge_enabled_ = false;  // Cut-off discharge gracefully so BMS never sleeps!
-    } else if (!discharge_enabled_ && soc >= 50.0f && v >= 48.5f) {
-      discharge_enabled_ = true;   // Re-enable discharge once charged safely above 50% and 48.5V
+    } else if (!discharge_enabled_ && soc >= 60.0f && v >= 49.0f) {
+      discharge_enabled_ = true;   // Re-enable discharge once charged safely to 60% and 49.0V
     }
   }
 
@@ -173,12 +190,30 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     }
     float soc = get_soc();
     float v = get_voltage();
+    uint16_t limit = 1200;  // 120.0A (Matches Table Maximum Charging Current = 120.0A for 7.5kW Solar)
+
     if (soc >= 98.0f || v >= 53.4f) {
-      return 150;  // 15.0A (Float/Balance stage ~2A/pack for 7-8 packs)
+      limit = 150;  // 15.0A (Float/Balance stage ~2A/pack for 7-8 packs)
     } else if (soc >= 90.0f || v >= 53.0f) {
-      return 400;  // 40.0A (Absorption stage ~5A/pack for 7-8 packs)
+      limit = 400;  // 40.0A (Absorption stage ~5A/pack for 7-8 packs)
     }
-    return 1200;   // 120.0A (Matches Table Maximum Charging Current = 120.0A for 7.5kW Solar)
+
+    // Dynamic Cell-Spike Protection:
+    // If any single cell across all active packs spikes during charging,
+    // immediately throttle down current to give passive balancers time and prevent BMS OVP cut-off!
+    uint16_t max_cell = get_max_cell_voltage_mv();
+    if (max_cell >= 3600) {
+      limit = 0;    // 0.0A (Cell at 3.60V+: stop charge to prevent Huawei BMS 3.65V OVP trip)
+      ESP_LOGW(TAG, "CELL SPIKE CRITICAL: Max cell %u mV >= 3600 mV -> Charge stopped (0.0A)", max_cell);
+    } else if (max_cell >= 3550) {
+      limit = std::min(limit, (uint16_t)100);  // Max 10.0A (Cell at 3.55V+)
+      ESP_LOGW(TAG, "CELL SPIKE HIGH: Max cell %u mV >= 3550 mV -> Charge throttled to 10.0A", max_cell);
+    } else if (max_cell >= 3500) {
+      limit = std::min(limit, (uint16_t)200);  // Max 20.0A (Cell at 3.50V+)
+      ESP_LOGI(TAG, "CELL SPIKE DETECTED: Max cell %u mV >= 3500 mV -> Charge throttled to 20.0A", max_cell);
+    }
+
+    return limit;
   }
 
   // Discharge current limit (in 0.1A units)
