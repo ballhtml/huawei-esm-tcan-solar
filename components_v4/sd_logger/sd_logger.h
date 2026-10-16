@@ -79,7 +79,7 @@ class SDLogger : public PollingComponent {
   }
 
   void dump_config() override {
-    ESP_LOGCONFIG(TAG, "SD Card Data Logger (Daily Rotation & 3-Day Retention):");
+    ESP_LOGCONFIG(TAG, "SD Card Data Logger (Daily Rotation & 30-Day Retention):");
     ESP_LOGCONFIG(TAG, "  Pins: CS=%d, MOSI=%d, MISO=%d, CLK=%d", cs_pin_, mosi_pin_, miso_pin_, clk_pin_);
     ESP_LOGCONFIG(TAG, "  Mount Status: %s (error: %s)", mounted_ ? "MOUNTED (OK)" : "FAILED / NOT MOUNTED", last_error_.c_str());
     ESP_LOGCONFIG(TAG, "  HTTP Download Port: %d", http_port_);
@@ -108,7 +108,7 @@ class SDLogger : public PollingComponent {
     };
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    host.max_freq_khz = 5000;  // 5 MHz for rock-solid stability with all card types (SDSC, SDHC, SDXC)
 
     if (!spi_initialized_) {
       spi_bus_config_t bus_cfg = {
@@ -164,8 +164,10 @@ class SDLogger : public PollingComponent {
   void update() override {
     if (!mounted_) {
       static uint32_t retry_count = 0;
-      if (++retry_count % 3 == 0) {  // retry mount every 30s
-        ESP_LOGW(TAG, "SD Card not yet mounted (%s). Retrying mount...", last_error_.c_str());
+      // When SD card is missing, only retry once every 10 minutes (60 ticks * 10s = 600s)
+      // to completely prevent SPI bus from locking up the main loop and freezing Pylontech/CAN!
+      if (++retry_count % 60 == 0) {
+        ESP_LOGW(TAG, "SD Card not yet mounted (%s). Retrying mount once every 10 min...", last_error_.c_str());
         try_mount();
       }
       return;
@@ -235,7 +237,7 @@ class SDLogger : public PollingComponent {
     }
   }
 
-  // Deletes any daily log files older than 3 days (scans days 4 to 30)
+  // Deletes any daily log files older than 30 days (scans days 31 to 365)
   void clean_old_logs() {
     if (!mounted_) return;
 
@@ -246,7 +248,7 @@ class SDLogger : public PollingComponent {
     // If system time has not synced yet (year < 2024), do not delete anything
     if (now_sec < 1700000000) return;
 
-    for (int d = 4; d <= 30; d++) {
+    for (int d = 31; d <= 365; d++) {
       time_t past_sec = now_sec - (d * 86400);
       struct tm past_tm;
       localtime_r(&past_sec, &past_tm);
@@ -459,14 +461,34 @@ class SDLogger : public PollingComponent {
             const char *redirect = "HTTP/1.1 302 Found\r\nLocation: /\r\nConnection: close\r\n\r\n";
             lwip_send(client_fd, redirect, strlen(redirect), 0);
           } else {
-            // Status landing page — check files for last 4 days directly
-            std::string file_list_html = "";
+            // Status landing page — stream HTML chunk-by-chunk to avoid buffer overflow
+            const char *hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+            lwip_send(client_fd, hdr, strlen(hdr), 0);
+
+            char chunk[1024];
+            snprintf(chunk, sizeof(chunk),
+                     "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Huawei ESM SD Logger</title></head>"
+                     "<body style='font-family:sans-serif;padding:20px;max-width:650px;margin:auto;'>"
+                     "<h2>🔋 Huawei ESM-48100B1 SD Logger</h2>"
+                     "<p><b>Status:</b> %s</p>"
+                     "<p><b>Detail:</b> %s</p>"
+                     "<p><b>Current Time:</b> %s</p>"
+                     "<p><b>Policy:</b> Daily file rotation + Automatic 30-day retention cleanup</p>"
+                     "<hr>"
+                     "<h3>📁 Available Daily Logs (Last 30 Days)</h3>"
+                     "<ul>",
+                     mounted_ ? "✅ Mounted (FAT32 Active)" : "❌ Not Mounted",
+                     last_error_.c_str(),
+                     get_datetime_str().c_str());
+            lwip_send(client_fd, chunk, strlen(chunk), 0);
+
+            bool found_file = false;
             time_t now_sec = ::time(nullptr);
             if (time_ != nullptr && time_->now().is_valid()) {
               now_sec = time_->now().timestamp;
             }
             if (now_sec >= 1700000000) {
-              for (int d = 0; d < 4; d++) {
+              for (int d = 0; d < 30; d++) {
                 time_t t_sec = now_sec - (d * 86400);
                 struct tm t_tm;
                 localtime_r(&t_sec, &t_tm);
@@ -480,12 +502,12 @@ class SDLogger : public PollingComponent {
                   fseek(check_f, 0, SEEK_END);
                   long fsize = ftell(check_f);
                   fclose(check_f);
-                  char item[256];
-                  snprintf(item, sizeof(item),
+                  snprintf(chunk, sizeof(chunk),
                            "<li><a href='/%s' style='font-weight:bold;'>📄 %s</a> &nbsp;(%.2f KB) %s</li>",
                            fname, fname, fsize / 1024.0f,
                            d == 0 ? "<span style='color:#28a745;'><b>[Today]</b></span>" : "");
-                  file_list_html += item;
+                  lwip_send(client_fd, chunk, strlen(chunk), 0);
+                  found_file = true;
                 }
               }
             }
@@ -494,54 +516,41 @@ class SDLogger : public PollingComponent {
               fseek(f_leg, 0, SEEK_END);
               long fsize = ftell(f_leg);
               fclose(f_leg);
-              char item[256];
-              snprintf(item, sizeof(item),
+              snprintf(chunk, sizeof(chunk),
                        "<li><a href='/bms_log.csv'>📄 bms_log.csv (Legacy)</a> &nbsp;(%.2f KB)</li>",
                        fsize / 1024.0f);
-              file_list_html += item;
+              lwip_send(client_fd, chunk, strlen(chunk), 0);
+              found_file = true;
             }
-            if (file_list_html.empty()) {
-              file_list_html = "<li>No log files recorded yet.</li>";
+            if (!found_file) {
+              const char *none = "<li>No log files recorded yet.</li>";
+              lwip_send(client_fd, none, strlen(none), 0);
             }
 
-            int html_len = snprintf(tx_buf, sizeof(tx_buf),
-                                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                                    "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Huawei ESM SD Logger</title></head>"
-                                    "<body style='font-family:sans-serif;padding:20px;max-width:650px;margin:auto;'>"
-                                    "<h2>🔋 Huawei ESM-48100B1 SD Logger</h2>"
-                                    "<p><b>Status:</b> %s</p>"
-                                    "<p><b>Detail:</b> %s</p>"
-                                    "<p><b>Current Time:</b> %s</p>"
-                                    "<p><b>Policy:</b> Daily file rotation + Automatic 3-day retention cleanup</p>"
-                                    "<hr>"
-                                    "<h3>📁 Available Daily Logs (Last 3 Days)</h3>"
-                                    "<ul>%s</ul>"
-                                    "<hr>"
-                                    "<h3>📊 Live Telemetry</h3>"
-                                    "<ul>"
-                                    "<li><b>Total Voltage:</b> %.2f V</li>"
-                                    "<li><b>Total Current:</b> %.2f A</li>"
-                                    "<li><b>Total Power:</b> %.1f W</li>"
-                                    "<li><b>Total SOC:</b> %.0f %%</li>"
-                                    "<li><b>Max Cell Temp:</b> %.0f &deg;C</li>"
-                                    "<li><b>Inverter Queries:</b> %lu</li>"
-                                    "</ul>"
-                                    "<hr>"
-                                    "<p><a href='/log.csv' style='display:inline-block;padding:10px 20px;background:#28a745;color:white;text-decoration:none;border-radius:5px;'>⬇️ Download Today's Log</a></p>"
-                                    "<p><a href='/clear' onclick='return confirm(\"Reset today log?\");' style='color:#dc3545;'>Reset Today's Log</a> &nbsp;|&nbsp; "
-                                    "<a href='/format' onclick='return confirm(\"Re-format MicroSD Card to FAT32? All data will be deleted.\");' style='color:#e0a800;'>Re-format SD to FAT32</a></p>"
-                                    "</body></html>",
-                                    mounted_ ? "✅ Mounted (FAT32 Active)" : "❌ Not Mounted",
-                                    last_error_.c_str(),
-                                    get_datetime_str().c_str(),
-                                    file_list_html.c_str(),
-                                    get_val(voltage_sensor_),
-                                    get_val(current_sensor_),
-                                    get_val(power_sensor_),
-                                    get_val(soc_sensor_),
-                                    get_val(temp_sensor_),
-                                    (unsigned long)get_val(inq_sensor_));
-            lwip_send(client_fd, tx_buf, html_len, 0);
+            snprintf(chunk, sizeof(chunk),
+                     "</ul>"
+                     "<hr>"
+                     "<h3>📊 Live Telemetry</h3>"
+                     "<ul>"
+                     "<li><b>Total Voltage:</b> %.2f V</li>"
+                     "<li><b>Total Current:</b> %.2f A</li>"
+                     "<li><b>Total Power:</b> %.1f W</li>"
+                     "<li><b>Total SOC:</b> %.0f %%</li>"
+                     "<li><b>Max Cell Temp:</b> %.0f &deg;C</li>"
+                     "<li><b>Inverter Queries:</b> %lu</li>"
+                     "</ul>"
+                     "<hr>"
+                     "<p><a href='/log.csv' style='display:inline-block;padding:10px 20px;background:#28a745;color:white;text-decoration:none;border-radius:5px;'>⬇️ Download Today's Log</a></p>"
+                     "<p><a href='/clear' onclick='return confirm(\"Reset today log?\");' style='color:#dc3545;'>Reset Today's Log</a> &nbsp;|&nbsp; "
+                     "<a href='/format' onclick='return confirm(\"Re-format MicroSD Card to FAT32? All data will be deleted.\");' style='color:#e0a800;'>Re-format SD to FAT32</a></p>"
+                     "</body></html>",
+                     get_val(voltage_sensor_),
+                     get_val(current_sensor_),
+                     get_val(power_sensor_),
+                     get_val(soc_sensor_),
+                     get_val(temp_sensor_),
+                     (unsigned long)get_val(inq_sensor_));
+            lwip_send(client_fd, chunk, strlen(chunk), 0);
           }
         }
 
