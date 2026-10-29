@@ -360,48 +360,72 @@ views:
       title: Battery Packs Real-Time Load Sharing
       subtitle: การจัดอันดับและประวัติการแบ่งกระแสไฟเรียลไทม์
     - type: markdown
-      content: "{% set packs = [\n  {'num': 1, 'v': states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_1_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_1_state_of_charge')},\n\
-        \  {'num': 2, 'v': states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_2_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_2_state_of_charge')},\n\
-        \  {'num': 3, 'v': states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_3_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_3_state_of_charge')},\n\
-        \  {'num': 4, 'v': states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_4_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_4_state_of_charge')},\n\
-        \  {'num': 5, 'v': states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_5_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_5_state_of_charge')},\n\
-        \  {'num': 6, 'v': states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_6_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_6_state_of_charge')},\n\
-        \  {'num': 7, 'v': states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_7_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_7_state_of_charge')},\n\
-        \  {'num': 8, 'v': states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0),\
-        \ 'i': states('sensor.huawei_esm_battery_system_pack_8_current')|float(0),\
-        \ 'soc': states('sensor.huawei_esm_battery_system_pack_8_state_of_charge')}\n\
+      content: "{% set packs = [\n  {'num': 1, 'v': states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_1_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_1_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_1_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_1_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_1_total_discharged_energy')|float(0)},\n\
+        \  {'num': 2, 'v': states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_2_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_2_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_2_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_2_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_2_total_discharged_energy')|float(0)},\n\
+        \  {'num': 3, 'v': states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_3_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_3_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_3_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_3_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_3_total_discharged_energy')|float(0)},\n\
+        \  {'num': 4, 'v': states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_4_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_4_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_4_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_4_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_4_total_discharged_energy')|float(0)},\n\
+        \  {'num': 5, 'v': states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_5_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_5_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_5_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_5_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_5_total_discharged_energy')|float(0)},\n\
+        \  {'num': 6, 'v': states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_6_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_6_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_6_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_6_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_6_total_discharged_energy')|float(0)},\n\
+        \  {'num': 7, 'v': states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_7_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_7_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_7_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_7_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_7_total_discharged_energy')|float(0)},\n\
+        \  {'num': 8, 'v': states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0),\n\
+        \   'i': states('sensor.huawei_esm_battery_system_pack_8_current')|float(0),\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_8_state_of_charge'),\n\
+        \   'soh': states('sensor.huawei_esm_battery_system_pack_8_state_of_health')|float(100),\n\
+        \   'mode': states('sensor.huawei_esm_battery_system_pack_8_bms_operating_mode')|int(0),\n\
+        \   'wh': states('sensor.huawei_esm_battery_system_pack_8_total_discharged_energy')|float(0)}\n\
         ] %}\n{%- set active = packs | rejectattr('soc', 'in', ['unknown', 'unavailable'])\
-        \ | selectattr('v', 'gt', 20.0) | list %} {%- set total_i = active | map(attribute='i')\
+        \ | selectattr('v', 'gt', 20.0) | list %}\n{%- set total_i = active | map(attribute='i')\
         \ | sum %}\n{%- set is_charging = total_i >= 0 %}\n{%- set sorted_packs =\
-        \ active | sort(attribute='i', reverse=is_charging) %} {%- set top_pack =\
+        \ active | sort(attribute='i', reverse=is_charging) %}\n{%- set top_pack =\
         \ sorted_packs[0] if sorted_packs | length > 0 else none %}\n{% if top_pack\
-        \ and top_pack.i < -1.0 %} > ⚡ **จ่ายไฟหนักสุด:** **Pack {{ top_pack.num }}**\
-        \ ({{ '%+.2f' | format(top_pack.i) }} A / {{ '%+.0f' | format(top_pack.v *\
-        \ top_pack.i) }} W) {% elif top_pack and top_pack.i > 1.0 %} > \U0001F50B\
+        \ and top_pack.i < -1.0 %}\n> ⚡ **จ่ายไฟหนักสุด:** **Pack {{ top_pack.num\
+        \ }}** ({{ '%+.2f' | format(top_pack.i) }} A / {{ '%+.0f' | format(top_pack.v\
+        \ * top_pack.i) }} W)\n{% elif top_pack and top_pack.i > 1.0 %}\n> \U0001F50B\
         \ **รับชาร์จไฟสูงสุด:** **Pack {{ top_pack.num }}** ({{ '%+.2f' | format(top_pack.i)\
-        \ }} A / {{ '%+.0f' | format(top_pack.v * top_pack.i) }} W) {% else %} > \U0001F4A4\
-        \ **สถานะรวม:** สแตนด์บาย / กระแสนิ่งสมดุล {% endif %}\n<center> <table style=\"\
-        margin: 0 auto !important; border-collapse: collapse; text-align: center;\
-        \ font-size: 14px; white-space: nowrap;\">\n  <thead>\n    <tr style=\"background:\
-        \ rgba(255,255,255,0.03); color: var(--secondary-text-color, #9e9e9e);\">\n\
-        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ }} A / {{ '%+.0f' | format(top_pack.v * top_pack.i) }} W)\n{% else %}\n\
+        > \U0001F4A4 **สถานะรวม:** สแตนด์บาย / กระแสนิ่งสมดุล\n{% endif %}\n<center>\n\
+        <table style=\"margin: 0 auto !important; border-collapse: collapse; text-align:\
+        \ center; font-size: 13.5px; white-space: nowrap;\">\n  <thead>\n    <tr style=\"\
+        background: rgba(255,255,255,0.03); color: var(--secondary-text-color, #9e9e9e);\"\
+        >\n      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 10px; font-weight: 600; text-align: center;\">#</th>\n    \
         \  <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 14px; font-weight: 600; text-align: center;\">สถานะ</th>\n\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">โหมด BMS</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 12px; font-weight: 600; text-align: center;\">กระแส&nbsp;(A)</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
@@ -410,26 +434,38 @@ views:
         \ padding: 8px 10px; font-weight: 600; text-align: center;\">แรงดัน&nbsp;(V)</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 10px; font-weight: 600; text-align: center;\">SOC</th>\n  \
-        \  </tr>\n  </thead>\n  <tbody>\n    {% for p in sorted_packs -%}\n    {%\
-        \ set icon = '\U0001F947&nbsp;' ~ p.num if loop.index == 1 else ('\U0001F948\
-        &nbsp;' ~ p.num if loop.index == 2 else ('\U0001F949&nbsp;' ~ p.num if loop.index\
-        \ == 3 else p.num)) -%}\n    {% set status = '\U0001F534&nbsp;จ่ายไฟหลัก'\
-        \ if p.i < -8.0 else ('\U0001F7E0&nbsp;จ่ายไฟ' if p.i < -2.0 else ('\U0001F7E1\
-        &nbsp;จ่ายไฟเบา' if p.i < -0.5 else ('\U0001F7E2&nbsp;ชาร์จไฟหลัก' if p.i\
-        \ > 8.0 else ('\U0001F7E2&nbsp;ชาร์จไฟ' if p.i > 1.0 else '⚪&nbsp;สแตนด์บาย'))))\
-        \ -%}\n    <tr>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 9px 10px; font-weight: bold; text-align:\
-        \ center;\">{{ icon }}</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 9px 14px; text-align: center;\">{{ status\
-        \ }}</td>\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 9px 12px; font-weight: bold; text-align: center;\">{{ '%+.2f' |\
-        \ format(p.i) }} A</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ '%+.0f'\
+        \    <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">SOH</th>\n  \
+        \    <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">จ่ายสะสม</th>\n\
+        \    </tr>\n  </thead>\n  <tbody>\n    {% for p in sorted_packs -%}\n    {%\
+        \ set icon = '\U0001F947 ' ~ p.num if loop.index == 1 else ('\U0001F948 '\
+        \ ~ p.num if loop.index == 2 else ('\U0001F949 ' ~ p.num if loop.index ==\
+        \ 3 else p.num)) -%}\n    {% set bms_status = '\U0001F7E2 ชาร์จ' if p.mode\
+        \ == 2 else ('⚡ จ่ายไฟ' if p.mode == 3 else ('⚪ พัก' if (p.mode == 4 or (p.mode\
+        \ == 0 and p.i|abs <= 0.3)) else ('\U0001F7E2 ชาร์จ' if p.i > 0.5 else ('⚡\
+        \ จ่ายไฟ' if p.i < -0.5 else '⚪ พัก')))) -%}\n    {% set kwh_str = '{:,.0f}\
+        \ kWh'.format(p.wh / 1000.0) if p.wh > 0 else '-' -%}\n    <tr>\n      <td\
+        \ style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: bold; text-align: center;\">{{ icon }}</td>\n\
+        \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; text-align: center;\">{{ bms_status }}</td>\n      <td\
+        \ style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 12px; font-weight: bold; text-align: center; color: {{ '#4caf50'\
+        \ if p.i > 0.3 else ('#ff9800' if p.i < -0.3 else 'inherit') }};\">{{ '%+.2f'\
+        \ | format(p.i) }} A</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 10px; text-align: center;\">{{ '%+.0f'\
         \ | format(p.v * p.i) }} W</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ '%.1f'\
+        \ rgba(127,127,127,0.18)); padding: 8px 10px; text-align: center;\">{{ '%.1f'\
         \ | format(p.v) }} V</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ p.soc\
-        \ }}%</td>\n    </tr>\n    {% endfor %}\n  </tbody>\n</table> </center>"
+        \ rgba(127,127,127,0.18)); padding: 8px 10px; font-weight: bold; text-align:\
+        \ center;\">{{ '%.0f' | format(p.soc|float(0)) }}%</td>\n      <td style=\"\
+        border: 1px solid var(--divider-color, rgba(127,127,127,0.18)); padding: 8px\
+        \ 10px; text-align: center; color: #4caf50; font-weight: 600;\">{{ '%.0f'\
+        \ | format(p.soh) }}%</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 10px; font-size: 12.5px; text-align:\
+        \ center; color: var(--secondary-text-color);\">{{ kwh_str }}</td>\n    </tr>\n\
+        \    {% endfor %}\n  </tbody>\n</table>\n</center>"
     - type: grid
       columns: 4
       square: false
@@ -1041,22 +1077,28 @@ views:
       title: 🛡️ สุขภาพฮาร์ดแวร์ อุณหภูมิ และพลังงานสะสม
       subtitle: รายงานอุณหภูมิเซลล์ สุขภาพ (SOH) และหน่วยจ่ายไฟสะสมตลอดชีพ
     - type: markdown
-      content: "### \U0001F6E1️ สุขภาพฮาร์ดแวร์ อุณหภูมิ และพลังงานสะสมรายแพ็ก\n\n\
-        | แพ็ก # | อุณหภูมิเซลล์สูงสุด | สุขภาพแบตเตอรี่ (SOH) | พลังงานจ่ายสะสมตลอดชีพ\
-        \ |\n|:---:|:---:|:---:|:---:|\n{%- for p in range(1, 9) %}\n{%- set temp_ent\
-        \ = 'sensor.huawei_esm_battery_system_pack_' ~ p ~ '_max_cell_temperature'\
-        \ %}\n{%- set temp_val = states(temp_ent)|float(0) %}\n{%- set soh_ent = 'sensor.huawei_esm_battery_system_pack_'\
-        \ ~ p ~ '_state_of_health' %}\n{%- set soh_val = states(soh_ent)|float(100)\
+      content: "### \U0001F6E1️ สุขภาพฮาร์ดแวร์ อุณหภูมิ และพลังงานสะสมรายแพ็ก (Huawei\
+        \ ESM Cluster)\n\n| แพ็ก # | รุ่นโมดูล (Model) | โหมด BMS | อุณหภูมิ (Max/Min)\
+        \ | สุขภาพ (SOH) | แรงดันแพ็ก | พลังงานจ่ายสะสมตลอดชีพ |\n|:---:|:---:|:---:|:---:|:---:|:---:|:---:|\n\
+        {%- for p in range(1, 9) %}\n{%- set temp_max = states('sensor.huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_max_cell_temperature')|float(0) %}\n{%- set temp_min = states('sensor.huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_min_cell_temperature')|float(0) %}\n{%- set soh_val = states('sensor.huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_state_of_health')|float(100) %}\n{%- set mode = states('sensor.huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_bms_operating_mode')|int(0) %}\n{%- set mode_str = '\U0001F7E2 ชาร์จ'\
+        \ if mode == 2 else ('⚡ จ่ายไฟ' if mode == 3 else '⚪ สแตนด์บาย') %}\n{%- set\
+        \ v_pack = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_battery_voltage')|float(0)\
         \ %}\n{%- set dchg_raw = states('sensor.huawei_esm_battery_system_pack_' ~\
         \ p ~ '_total_discharged_energy')|float(-1) %}\n{%- if dchg_raw < 0 %}\n \
         \ {%- set dchg_raw = states('sensor.home_energy_huawei_esm_battery_system_pack_'\
         \ ~ p ~ '_total_discharged_energy')|float(-1) %}\n{%- endif %}\n{%- set dchg_text\
         \ = '{:,.1f} kWh'.format(dchg_raw / 1000.0) if dchg_raw > 0 else '-' %}\n\
-        {%- set temp_badge = '\U0001F7E2' if temp_val < 38 else ('\U0001F7E1' if temp_val\
-        \ < 45 else '\U0001F534') %}\n| **Pack #{{ p }}** | {{ temp_badge }} {{ '%.0f'|format(temp_val)\
-        \ }} °C | {{ '%.0f'|format(soh_val) }}% (สมบูรณ์) | **{{ dchg_text }}** |\n\
-        {%- endfor %}\n\n> ℹ️ *ข้อมูลฮาร์ดแวร์จริง: อ่านผ่าน Modbus Function 0x03\
-        \ จากรีจิสเตอร์ 0x0004 (SOH), 0x0005 (Temp) และ 0x0042 (Discharged Energy)*\n"
+        {%- set temp_badge = '\U0001F7E2' if temp_max < 38 else ('\U0001F7E1' if temp_max\
+        \ < 45 else '\U0001F534') %}\n| **Pack #{{ p }}** | ESM-48100B1 | {{ mode_str\
+        \ }} | {{ temp_badge }} {{ '%.0f'|format(temp_max) }}°C / {{ '%.0f'|format(temp_min)\
+        \ }}°C | {{ '%.0f'|format(soh_val) }}% | {{ '%.2f'|format(v_pack) }} V | **{{\
+        \ dchg_text }}** |\n{%- endfor %}\n\n> ℹ️ *ข้อมูลฮาร์ดแวร์จริง: ถอดรหัสสดจากรีจิสเตอร์มาตรฐาน:\
+        \ 0x0001 (Voltage), 0x0004 (SOH), 0x0005/0x0006 (Temp), 0x000E (BMS Mode)\
+        \ และ 0x0342 (Lifetime Discharged Energy)*"
     - type: custom:mushroom-template-card
       primary: ดาวน์โหลด Log ความละเอียดสูงจาก MicroSD (.CSV)
       secondary: แตะเปิดเว็บเซิร์ฟเวอร์บอร์ด Inverter Bridge (http://192.168.8.109:8080)
@@ -1066,6 +1108,46 @@ views:
       tap_action:
         action: url
         url_path: http://192.168.8.109:8080
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: 🏷️ ป้ายทะเบียนดิจิทัล & เนมเพลตประจำโมดูล (ESM-48100B1 Nameplates)
+      subtitle: รายละเอียดคลัสเตอร์ 8 แพ็ก 800Ah / 38.4 kWh และการจัดพอร์ตบัสแยกอิสระ
+    - type: markdown
+      content: '| แพ็ก # | ยี่ห้อ & รุ่นโมดูล (Model) | พิกัดแรงดัน/ความจุ | DIP Slave
+        ID | พอร์ตบัสสื่อสาร | สถานะคลัสเตอร์ |
+
+        |:---:|:---|:---:|:---:|:---:|:---:|
+
+        | **Pack #1** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        214 (0xD6) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #2** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        215 (0xD7) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #3** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        216 (0xD8) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #4** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        214 (0xD6) | Port 2 (GPIO 18/25) | 🛡️ บัสแยกอิสระ |
+
+        | **Pack #5** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        218 (0xDA) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #6** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        219 (0xDB) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #7** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        220 (0xDC) | Port 1 (GPIO 33/32) | 🟢 ออนไลน์ทำงาน |
+
+        | **Pack #8** | Huawei ESM-48100B1 (15S LiFePO4) | 48V 100Ah (4.8 kWh) | ID
+        221 (0xDD) | บัสแยกพิเศษ (บอร์ด 109 ข้าม CAN) | 🛡️ บัสแยกอิสระ |
+
+
+        > 📌 **สเปกคลัสเตอร์รวม:** แรงดันมาตรฐาน 48V (51.2V Typ.) • ความจุรวม **800Ah
+        (38.4 kWh)** • ทั้งหมด 120 เซลล์ (15S8P) • พิกัดจ่ายกระแสรวม 300A • มีบัสแยกอิสระ
+        2 แพ็ก (Pack 4 & Pack 8) ป้องกันการรบกวนของแอดเดรสและสัญญาณรบกวน 100% • สื่อสาร
+        Inverter MaxSky EM11000 ผ่าน CAN Bus Pylontech (`LI2`)'
 - title: Inverter Setup
   path: inverter-setup
   icon: mdi:tune-vertical

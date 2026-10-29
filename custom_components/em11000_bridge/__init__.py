@@ -84,13 +84,13 @@ class EM11000SelectBridge:
         """Send UDP steering signal to Wi-Fi plug with rate-limiting backoff."""
         now = time.time()
         if self.rearm_count == 0:
-            interval = 1.0
+            interval = 2.0
         elif self.rearm_count < 3:
-            interval = 4.0
-        elif self.rearm_count < 8:
-            interval = 10.0
+            interval = 5.0
+        elif self.rearm_count < 6:
+            interval = 15.0
         else:
-            interval = 30.0
+            interval = 120.0
 
         if (now - self.last_rearm_time) < interval:
             return
@@ -135,6 +135,12 @@ class EM11000SelectBridge:
                 self.send_rearm_udp()
                 try:
                     plug_sock, plug_addr = server.accept()
+                    if plug_addr[0] != DEFAULT_PLUG_IP:
+                        audit_log(f"[STRAY_CONN] Rejected non-plug connection from {plug_addr}")
+                        try: plug_sock.close()
+                        except Exception: pass
+                        plug_sock = None
+                        continue
                     d_sec = (time.time() - self.disconnect_time) if self.disconnect_time else 0.0
                     audit_log(f"[CONNECT] Wi-Fi Plug connected from {plug_addr} (offline {d_sec:.1f}s, {self.rearm_count} UDP signals). Bridge session ACTIVE.")
                     self.disconnect_time = None
