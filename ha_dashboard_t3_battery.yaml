@@ -1,0 +1,137 @@
+# ==============================================================================
+# Home Assistant Lovelace Card: T3 Technology / Paco Casa TB48100 Lithium Battery
+# BMS: Pace BMS 15S 48V 100Ah LiFePO4
+# High-Density Dashboard Card with 15-Cell Bar & Thermal Matrix
+# ==============================================================================
+
+type: vertical-stack
+title: "T3 Battery (TB48100 15S 48V 100Ah)"
+cards:
+  # ----------------------------------------------------------------------------
+  # 1. Primary Metrics (SOC Gauge, Power, Voltage, Current)
+  # ----------------------------------------------------------------------------
+  - type: glance
+    show_name: true
+    show_icon: true
+    show_state: true
+    columns: 4
+    entities:
+      - entity: sensor.t3_pack_voltage
+        name: "Voltage"
+        icon: "mdi:flash"
+      - entity: sensor.t3_pack_current
+        name: "Current"
+        icon: "mdi:current-dc"
+      - entity: sensor.t3_pack_power
+        name: "Power"
+        icon: "mdi:lightning-bolt"
+      - entity: sensor.t3_state_of_charge
+        name: "SOC"
+        icon: "mdi:battery-high"
+
+  # ----------------------------------------------------------------------------
+  # 2. Capacity & Health Summary
+  # ----------------------------------------------------------------------------
+  - type: entities
+    title: "Battery Health & Capacity"
+    show_header_toggle: false
+    entities:
+      - entity: sensor.t3_remaining_capacity
+        name: "Remaining Capacity"
+        icon: "mdi:battery-charging-100"
+      - entity: sensor.t3_full_capacity
+        name: "Full Capacity"
+        icon: "mdi:battery"
+      - entity: sensor.t3_state_of_health
+        name: "State of Health (SOH)"
+        icon: "mdi:heart-pulse"
+      - entity: sensor.t3_cycle_count
+        name: "Total Cycle Count"
+        icon: "mdi:battery-sync"
+      - entity: binary_sensor.t3_charging_active
+        name: "Charging Status"
+      - entity: binary_sensor.t3_discharging_active
+        name: "Discharging Status"
+
+  # ----------------------------------------------------------------------------
+  # 3. Cell Voltages (15S LiFePO4 Voltage Bar & Delta Analysis)
+  # ----------------------------------------------------------------------------
+  - type: entities
+    title: "Cell Voltage Delta & Extremes"
+    show_header_toggle: false
+    entities:
+      - entity: sensor.t3_cell_delta_voltage
+        name: "Cell Delta"
+        icon: "mdi:delta"
+      - entity: sensor.t3_cell_max_voltage
+        name: "Highest Cell Voltage"
+        icon: "mdi:arrow-up-bold"
+      - entity: sensor.t3_cell_min_voltage
+        name: "Lowest Cell Voltage"
+        icon: "mdi:arrow-down-bold"
+
+  - type: glance
+    title: "Individual Cell Voltages (Cells 1 - 8)"
+    columns: 4
+    entities:
+      - entity: sensor.t3_cell_1_voltage
+        name: "Cell 1"
+      - entity: sensor.t3_cell_2_voltage
+        name: "Cell 2"
+      - entity: sensor.t3_cell_3_voltage
+        name: "Cell 3"
+      - entity: sensor.t3_cell_4_voltage
+        name: "Cell 4"
+      - entity: sensor.t3_cell_5_voltage
+        name: "Cell 5"
+      - entity: sensor.t3_cell_6_voltage
+        name: "Cell 6"
+      - entity: sensor.t3_cell_7_voltage
+        name: "Cell 7"
+      - entity: sensor.t3_cell_8_voltage
+        name: "Cell 8"
+
+  - type: glance
+    title: "Individual Cell Voltages (Cells 9 - 15)"
+    columns: 4
+    entities:
+      - entity: sensor.t3_cell_9_voltage
+        name: "Cell 9"
+      - entity: sensor.t3_cell_10_voltage
+        name: "Cell 10"
+      - entity: sensor.t3_cell_11_voltage
+        name: "Cell 11"
+      - entity: sensor.t3_cell_12_voltage
+        name: "Cell 12"
+      - entity: sensor.t3_cell_13_voltage
+        name: "Cell 13"
+      - entity: sensor.t3_cell_14_voltage
+        name: "Cell 14"
+      - entity: sensor.t3_cell_15_voltage
+        name: "Cell 15"
+
+  # ----------------------------------------------------------------------------
+  # 4. Thermal Matrix (4 Battery Probes, MOSFET & Ambient)
+  # ----------------------------------------------------------------------------
+  - type: glance
+    title: "Temperature Sensors (°C)"
+    columns: 3
+    entities:
+      - entity: sensor.t3_temp_1
+        name: "Probe 1"
+        icon: "mdi:thermometer"
+      - entity: sensor.t3_temp_2
+        name: "Probe 2"
+        icon: "mdi:thermometer"
+      - entity: sensor.t3_temp_3
+        name: "Probe 3"
+        icon: "mdi:thermometer"
+      - entity: sensor.t3_temp_4
+        name: "Probe 4"
+        icon: "mdi:thermometer"
+      - entity: sensor.t3_mosfet_temp
+        name: "MOSFET"
+        icon: "mdi:chip"
+      - entity: sensor.t3_ambient_temp
+        name: "Ambient"
+        icon: "mdi:home-thermometer-outline"

@@ -1,0 +1,9 @@
+"""Constants for EM11000 High-Speed Inverter Bridge."""
+
+DOMAIN = "em11000_bridge"
+DEFAULT_PORT = 8899
+DEFAULT_PLUG_IP = "192.168.8.166"
+DEFAULT_UDP_PORT = 58899
+CLOUD_HOST = "vip1.eybond.com"
+CLOUD_PORT = 502
+PLUG_SN = "92B32409100334"

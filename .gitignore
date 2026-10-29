@@ -1,0 +1,119 @@
+# ESPHome Build & Cache
+.esphome/
+*.bin
+*.elf
+*.a
+*.o
+
+# Sensitive credentials & diagnostics
+secrets.yaml
+*.json
+*.pcap
+
+# Python cache, virtualenv & build
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# IDE & AI Agent Metadata
+.agent/
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.impeccable/
+
+# Large vendor dumps, tools, executables & archives
+*.zip
+*.tar.gz
+*.7z
+*.exe
+*.msi
+*.msi.bak
+PbmsTools-485-XWDDC1.0.6/
+FxVisor_Portable/
+ZTE_BMS_Admin_Portable/
+bms-tool_paco_x64/
+bms tool (Portable)/
+bms tool (Protected)/
+bms tool/
+lv_demos-5.2-rc/
+lvgl-v9.6.0-lite/
+fonts/
+extracted/
+extracted_full_views/
+extracted_real/
+reconstructed/
+reconstructed_history/
+recovered_yamls/
+zte_bms_admin/
+narada BMS 4810 V1.1.634-31-05/
+3.1 Local Modbus Tools B5/
+components_v5/
+ha-dessmonitor/
+ha-eybond-local/
+home-assistant-dess-monitor/
+home-assistant-dess-monitor-local/
+huawei_esm_diagnostics_app/
+modbus2mqtt-main/
+cyd_hybrid_display/
+scripts/
+codex/
+dess_solar/
+ha_packages/
+
+# Scratch & Logs
+*.log
+*.csv
+*.html
+*.txt
+scratch/
+backups/
+backup_*/
+project_v2_inverter_bridge/
+temp_*/
+*.bak*
+
+# Images & PDFs
+*.jpg
+*.png
+*.pdf
+
+# Loose one-off diagnostic & test scripts at root
+/*.py
+!/vip_cloud_bridge_daemon.py
+!/em11000_dual_proxy.py
+/*.ps1
+/*.bat
+scratch_sensors.yaml
+test_font.yaml
+cyd-test.yaml
+26dc91f8*
+
+# Experimental & scratch hardware configs
+cyd-*.yaml
+cyd_gui_helpers.h
+em11000-solarplug.yaml
+ha_card_smart_8pack_cell_drilldown.yaml
+ha_dashboard_esm_*.yaml
+ha_dashboard_solar_battery_6pack.yaml
+huawei-esm-t-can485-3pack.*
+huawei-esm-t-can485-4pack*
+huawei-esm-t-can485-8pack.*.yaml
+huawei-esm-t-can485-8pack.yaml.*
+huawei_esm_stable_lite.yaml
+inverter-solar-bridge.*
+maxsky-rs232-test.*
+powmr-hvm11kp-bridge.yaml
+recovered_pylontech_emulator.h
+stitched_pylontech_emulator.h
+syssi-smg-ii.yaml
+*.factory.bin
+firmware.bin
+flash_*.bat

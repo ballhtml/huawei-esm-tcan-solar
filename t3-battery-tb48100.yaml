@@ -1,0 +1,739 @@
+# ==============================================================================
+# ESPHome Configuration for T3 Lithium Battery (Paco Casa / T3 Technology TB48100)
+# BMS Architecture: Pace BMS (1P15S 48V 100Ah LiFePO4)
+# Hardware: LILYGO T-CAN485 (or generic ESP32 + RS485 Transceiver)
+# Communication: RS485 @ 9600 Baud, 8N1 (Pace Modbus RTU)
+# RJ45 Pinout (T3 COM Port):
+#   Pin 1 (White-Orange) -> RS485-A (A+)
+#   Pin 2 (Orange)       -> RS485-B (B-)
+#   Pin 7 -> CAN_H (500kbps Pylontech broadcast)
+#   Pin 8 -> CAN_L
+# ==============================================================================
+
+substitutions:
+  name: "t3-battery"
+  friendly_name: "T3 Battery TB48100"
+  modbus_address: "0x01"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  build_path: C:\esphome_build\t3_battery
+  platformio_options:
+    build_flags:
+      - "-mlongcalls"
+  on_boot:
+    priority: -10
+    then:
+      - switch.turn_on: power_5v_boost
+      - switch.turn_on: rs485_power
+      - switch.turn_on: rs485_chip_enable
+      - switch.turn_on: rs485_autodirection
+      - light.turn_on:
+          id: board_status_led
+          red: 0.0
+          green: 1.0
+          blue: 1.0
+          brightness: 100%
+          transition_length: 0s
+      - delay: 1000ms
+      - light.turn_off:
+          id: board_status_led
+          transition_length: 0s
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_COMPILER_OPTIMIZATION_SIZE: "y"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  manual_ip:
+    static_ip: 192.168.8.110
+    gateway: 192.168.8.1
+    subnet: 255.255.255.0
+    dns1: 192.168.8.1
+    dns2: 8.8.8.8
+  power_save_mode: NONE
+  ap:
+    ssid: "t3-battery-setup"
+    password: "bms_setup_password"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+  baud_rate: 0
+
+# ------------------------------------------------------------------------------
+# Hardware Control: LILYGO T-CAN485 Power Boost & RS485 Enables
+# ------------------------------------------------------------------------------
+switch:
+  - platform: gpio
+    pin: {number: GPIO23, inverted: false}
+    id: power_5v_boost
+    name: "5V Boost Power Enable"
+    restore_mode: ALWAYS_ON
+
+  - platform: gpio
+    pin: {number: GPIO16, inverted: false}
+    id: rs485_power
+    name: "RS485 Power Enable"
+    restore_mode: ALWAYS_ON
+
+  - platform: gpio
+    pin: {number: GPIO19, inverted: false}
+    id: rs485_chip_enable
+    name: "RS485 Chip Enable"
+    restore_mode: ALWAYS_ON
+
+  - platform: gpio
+    pin: {number: GPIO17, inverted: false}
+    id: rs485_autodirection
+    name: "RS485 Auto Direction Enable"
+    restore_mode: ALWAYS_ON
+
+# ------------------------------------------------------------------------------
+# Board Status LED (WS2812 RGB on GPIO 4)
+# ------------------------------------------------------------------------------
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    rgb_order: GRB
+    pin: GPIO04
+    num_leds: 1
+    name: "T3 Board Status LED"
+    id: board_status_led
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+# ------------------------------------------------------------------------------
+# RS485 Bus Configuration (T-CAN485 Main Port: TX=22, RX=21)
+# ------------------------------------------------------------------------------
+uart:
+  - id: uart_t3_bms
+    tx_pin: GPIO22
+    rx_pin:
+      number: GPIO21
+      mode: INPUT_PULLUP
+    baud_rate: 9600
+    rx_buffer_size: 512
+
+modbus:
+  - id: modbus_t3
+    uart_id: uart_t3_bms
+    send_wait_time: 150ms
+
+modbus_controller:
+  - id: t3_bms_controller
+    address: ${modbus_address}
+    modbus_id: modbus_t3
+    setup_priority: -10
+    update_interval: 5s
+
+# ------------------------------------------------------------------------------
+# Binary Sensors (Status & Protection Flags)
+# ------------------------------------------------------------------------------
+binary_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Charging Active"
+    id: t3_charging_active
+    address: 11
+    register_type: holding
+    bitmask: 0x0100
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Discharging Active"
+    id: t3_discharging_active
+    address: 11
+    register_type: holding
+    bitmask: 0x0200
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Charge Allowed"
+    id: t3_charge_allowed
+    address: 11
+    register_type: holding
+    bitmask: 0x0400
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Discharge Allowed"
+    id: t3_discharge_allowed
+    address: 11
+    register_type: holding
+    bitmask: 0x0800
+
+  # Cell Balancing 1 to 15
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 1"
+    address: 12
+    register_type: holding
+    bitmask: 0x0001
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 2"
+    address: 12
+    register_type: holding
+    bitmask: 0x0002
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 3"
+    address: 12
+    register_type: holding
+    bitmask: 0x0004
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 4"
+    address: 12
+    register_type: holding
+    bitmask: 0x0008
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 5"
+    address: 12
+    register_type: holding
+    bitmask: 0x0010
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 6"
+    address: 12
+    register_type: holding
+    bitmask: 0x0020
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 7"
+    address: 12
+    register_type: holding
+    bitmask: 0x0040
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 8"
+    address: 12
+    register_type: holding
+    bitmask: 0x0080
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 9"
+    address: 12
+    register_type: holding
+    bitmask: 0x0100
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 10"
+    address: 12
+    register_type: holding
+    bitmask: 0x0200
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 11"
+    address: 12
+    register_type: holding
+    bitmask: 0x0400
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 12"
+    address: 12
+    register_type: holding
+    bitmask: 0x0800
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 13"
+    address: 12
+    register_type: holding
+    bitmask: 0x1000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 14"
+    address: 12
+    register_type: holding
+    bitmask: 0x2000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell Balance 15"
+    address: 12
+    register_type: holding
+    bitmask: 0x4000
+    entity_category: diagnostic
+
+# ------------------------------------------------------------------------------
+# Sensors (Telemetry, Voltages, Temperatures, Capacities)
+# ------------------------------------------------------------------------------
+sensor:
+  # Pack Current (Signed 16-bit, 10mA resolution, Positive=Charge, Negative=Discharge)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Pack Current"
+    id: t3_current
+    address: 0
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  # Pack Voltage (10mV resolution -> V)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Pack Voltage"
+    id: t3_voltage
+    address: 1
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  # State of Charge (SOC %)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 State of Charge"
+    id: t3_soc
+    address: 2
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    device_class: battery
+    state_class: measurement
+
+  # Remaining Capacity (10mAh -> Ah)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Remaining Capacity"
+    id: t3_remain_capacity
+    address: 4
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 2
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  # Full Capacity (10mAh -> Ah)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Full Capacity"
+    id: t3_full_capacity
+    address: 5
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 2
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  # Design Capacity (10mAh -> Ah)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Design Capacity"
+    id: t3_design_capacity
+    address: 6
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    filters:
+      - multiply: 0.01
+
+  # Cycle Count
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cycle Count"
+    id: t3_cycles
+    address: 7
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "cycles"
+    accuracy_decimals: 0
+    state_class: total_increasing
+    icon: "mdi:battery-sync"
+
+  # State of Health (SOH %)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 State of Health"
+    id: t3_soh
+    address: 8
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    icon: "mdi:heart-pulse"
+
+  # Power Calculation (V * I)
+  - platform: template
+    name: "T3 Pack Power"
+    id: t3_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+    lambda: |-
+      return id(t3_voltage).state * id(t3_current).state;
+
+  # Individual 15 Cell Voltages (mV -> V)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 1 Voltage"
+    id: t3_c1
+    address: 15
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 2 Voltage"
+    id: t3_c2
+    address: 16
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 3 Voltage"
+    id: t3_c3
+    address: 17
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 4 Voltage"
+    id: t3_c4
+    address: 18
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 5 Voltage"
+    id: t3_c5
+    address: 19
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 6 Voltage"
+    id: t3_c6
+    address: 20
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 7 Voltage"
+    id: t3_c7
+    address: 21
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 8 Voltage"
+    id: t3_c8
+    address: 22
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 9 Voltage"
+    id: t3_c9
+    address: 23
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 10 Voltage"
+    id: t3_c10
+    address: 24
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 11 Voltage"
+    id: t3_c11
+    address: 25
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 12 Voltage"
+    id: t3_c12
+    address: 26
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 13 Voltage"
+    id: t3_c13
+    address: 27
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 14 Voltage"
+    id: t3_c14
+    address: 28
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Cell 15 Voltage"
+    id: t3_c15
+    address: 29
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  # Min / Max / Delta Cell Voltage
+  - platform: template
+    name: "T3 Cell Min Voltage"
+    id: t3_cell_min
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+    lambda: |-
+      float min_v = 999.0f;
+      float cells[15] = {
+        id(t3_c1).state, id(t3_c2).state, id(t3_c3).state, id(t3_c4).state, id(t3_c5).state,
+        id(t3_c6).state, id(t3_c7).state, id(t3_c8).state, id(t3_c9).state, id(t3_c10).state,
+        id(t3_c11).state, id(t3_c12).state, id(t3_c13).state, id(t3_c14).state, id(t3_c15).state
+      };
+      for (int i = 0; i < 15; i++) {
+        if (!isnan(cells[i]) && cells[i] > 1.5f && cells[i] < min_v) min_v = cells[i];
+      }
+      return (min_v < 900.0f) ? min_v : NAN;
+
+  - platform: template
+    name: "T3 Cell Max Voltage"
+    id: t3_cell_max
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+    lambda: |-
+      float max_v = 0.0f;
+      float cells[15] = {
+        id(t3_c1).state, id(t3_c2).state, id(t3_c3).state, id(t3_c4).state, id(t3_c5).state,
+        id(t3_c6).state, id(t3_c7).state, id(t3_c8).state, id(t3_c9).state, id(t3_c10).state,
+        id(t3_c11).state, id(t3_c12).state, id(t3_c13).state, id(t3_c14).state, id(t3_c15).state
+      };
+      for (int i = 0; i < 15; i++) {
+        if (!isnan(cells[i]) && cells[i] > max_v) max_v = cells[i];
+      }
+      return (max_v > 0.0f) ? max_v : NAN;
+
+  - platform: template
+    name: "T3 Cell Delta Voltage"
+    id: t3_cell_delta
+    unit_of_measurement: "mV"
+    accuracy_decimals: 0
+    state_class: measurement
+    lambda: |-
+      float v_min = id(t3_cell_min).state;
+      float v_max = id(t3_cell_max).state;
+      if (!isnan(v_min) && !isnan(v_max) && v_max >= v_min) {
+        return (v_max - v_min) * 1000.0f;
+      }
+      return NAN;
+
+  # Temperatures (0.1 °C -> °C)
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Temp 1"
+    address: 31
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Temp 2"
+    address: 32
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Temp 3"
+    address: 33
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Temp 4"
+    address: 34
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 MOSFET Temp"
+    address: 35
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: t3_bms_controller
+    name: "T3 Ambient Temp"
+    address: 36
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - multiply: 0.1

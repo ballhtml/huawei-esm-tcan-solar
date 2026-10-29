@@ -1,0 +1,3821 @@
+# ==============================================================================
+# ESPHome Configuration for LILYGO T-CAN485 + Huawei ESM-48100B1 BMS (8-Pack Ready)
+# Version: 6.3.0 Enterprise (Green Activity Pulse LED with Instant Transition)
+# ==============================================================================
+
+esphome:
+  name: tcanesm
+  friendly_name: "Huawei ESM Battery System"
+  build_path: C:\esphome_build\tcanesm
+  includes:
+    - tcan_telemetry_shared.h
+  platformio_options:
+    build_flags:
+      - "-mlongcalls"
+  on_boot:
+    priority: -10
+    then:
+      - switch.turn_on: rs485_power
+      - switch.turn_off: rs485_chip_enable
+      - switch.turn_off: rs485_autodirection
+      - switch.turn_off: can_power
+      - switch.turn_on: pack1_monitor
+      - switch.turn_on: pack2_monitor
+      - switch.turn_on: pack3_monitor
+      - switch.turn_on: pack4_monitor
+      - switch.turn_on: pack5_monitor
+      - switch.turn_on: pack6_monitor
+      - switch.turn_on: pack7_monitor
+      - switch.turn_on: pack8_monitor
+      - lambda: |-
+          struct ModbusAccessor : public esphome::modbus::Modbus {
+            void set_delays(uint16_t frame_delay, uint16_t long_delay) {
+              this->frame_delay_ms_ = frame_delay;
+              this->long_rx_buffer_delay_ms_ = long_delay;
+            }
+          };
+          static_cast<ModbusAccessor *>(modbus_bms)->set_delays(250, 350);
+          static_cast<ModbusAccessor *>(modbus_pack4)->set_delays(250, 350);
+          ESP_LOGI("bms_init", "Modbus frame_delay set to 250ms, long_rx_delay set to 350ms for both buses");
+      - light.turn_on:
+          id: board_status_led
+          red: 0.0
+          green: 1.0
+          blue: 0.0
+          brightness: 100%
+          transition_length: 0s
+      - delay: 1000ms
+      - light.turn_off:
+          id: board_status_led
+          transition_length: 0s
+      - script.execute: modbus_polling_loop
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_COMPILER_OPTIMIZATION_SIZE: "y"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  manual_ip:
+    static_ip: 192.168.8.108
+    gateway: 192.168.8.1
+    subnet: 255.255.255.0
+    dns1: 192.168.8.1
+    dns2: 8.8.8.8
+  power_save_mode: NONE
+  ap:
+    ssid: "tcanesm-ap"
+    password: "bms_setup_password"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# Native Home Assistant API - Instant Auto-Discovery in Home Assistant
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+external_components:
+  - source:
+      type: local
+      path: components_v4
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+# ------------------------------------------------------------------------------
+# UART & Modbus Configuration (Isolated Port 1 - Hardware FIFO & Input Pullup)
+# ------------------------------------------------------------------------------
+uart:
+  # Port 1 (External Isolated Module on GPIO32/33) Connected to Battery Packs 1, 2, 3
+  - id: uart_bms
+    tx_pin: GPIO33
+    rx_pin:
+      number: GPIO32
+      mode: INPUT_PULLUP
+    baud_rate: 9600
+    parity: EVEN
+    stop_bits: 1
+    rx_timeout: 90
+    rx_buffer_size: 512
+
+  # Port 2 (External Isolated Module on GPIO18/25) for Pack 4 (Isolated Bus)
+  - id: uart_pack4
+    tx_pin: GPIO18
+    rx_pin:
+      number: GPIO25
+      mode: INPUT_PULLUP
+    baud_rate: 9600
+    parity: EVEN
+    stop_bits: 1
+    rx_timeout: 90
+    rx_buffer_size: 512
+
+
+
+# ------------------------------------------------------------------------------
+# CAN-Bus (TWAI 500kbps) Transmitter: ส่งข้อมูล Battery System ไปหา Board 2
+# ------------------------------------------------------------------------------
+canbus:
+  - platform: esp32_can
+    id: interconnect_can_bus
+    tx_pin: GPIO27
+    rx_pin: GPIO26
+    can_id: 0
+    bit_rate: 500kbps
+    on_frame:
+      # Frame 0x358: Pack 8 Summary Telemetry from Board 2 (192.168.8.109)
+      - can_id: 0x358
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t v_raw = x[0] | (x[1] << 8);
+                int16_t i_raw = (int16_t)(x[2] | (x[3] << 8));
+                uint8_t soc = x[4];
+                uint8_t soh = x[5];
+                int16_t t_raw = (int16_t)(x[6] | (x[7] << 8));
+                float v = (float)v_raw * 0.01f;
+                float i = (float)i_raw * 0.01f;
+                float temp = (float)t_raw * 0.1f;
+
+                if (v > 20.0f && v < 65.0f) {
+                  mark_pack_rx_fresh(7);
+                }
+
+                id(pack8_battery_voltage).publish_state(v);
+                id(pack8_busbar_voltage).publish_state(v);
+                id(pack8_current).publish_state(i);
+                id(pack8_state_of_charge).publish_state(soc);
+                id(pack8_state_of_health).publish_state(soh);
+                id(pack8_max_cell_temp).publish_state(temp);
+                if (isnan(id(pack8_min_cell_temp).state)) {
+                  id(pack8_min_cell_temp).publish_state(temp);
+                }
+                id(pack8_nominal_capacity).publish_state(100.0f);
+                id(pack8_bms_operating_mode).publish_state(2);
+
+                // Only seed fallback cell voltages if real cell frames (0x359..0x35C) have not arrived yet
+                if (isnan(id(pack8_cell_01_voltage).state)) {
+                  float cell_v = v / 15.0f;
+                  id(pack8_cell_01_voltage).publish_state(cell_v);
+                  id(pack8_cell_02_voltage).publish_state(cell_v);
+                  id(pack8_cell_03_voltage).publish_state(cell_v);
+                  id(pack8_cell_04_voltage).publish_state(cell_v);
+                  id(pack8_cell_05_voltage).publish_state(cell_v);
+                  id(pack8_cell_06_voltage).publish_state(cell_v);
+                  id(pack8_cell_07_voltage).publish_state(cell_v);
+                  id(pack8_cell_08_voltage).publish_state(cell_v);
+                  id(pack8_cell_09_voltage).publish_state(cell_v);
+                  id(pack8_cell_10_voltage).publish_state(cell_v);
+                  id(pack8_cell_11_voltage).publish_state(cell_v);
+                  id(pack8_cell_12_voltage).publish_state(cell_v);
+                  id(pack8_cell_13_voltage).publish_state(cell_v);
+                  id(pack8_cell_14_voltage).publish_state(cell_v);
+                  id(pack8_cell_15_voltage).publish_state(cell_v);
+                }
+
+                if (!id(pack8_monitor).state) {
+                  id(pack8_monitor).publish_state(true);
+                }
+                ESP_LOGD("can_rx_pack8", "Received Pack 8: V=%.2fV I=%.2fA SOC=%u%% Temp=%.1fC", v, i, soc, temp);
+              }
+      # Frames 0x359..0x35C: Pack 8 Real Individual Cell Voltages (Cells 1..15) + Min Temp from Board 109
+      - can_id: 0x359
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t c1 = x[0] | (x[1] << 8), c2 = x[2] | (x[3] << 8), c3 = x[4] | (x[5] << 8), c4 = x[6] | (x[7] << 8);
+                if (c1 > 1500 && c1 < 4500) id(pack8_cell_01_voltage).publish_state(c1 * 0.001f);
+                if (c2 > 1500 && c2 < 4500) id(pack8_cell_02_voltage).publish_state(c2 * 0.001f);
+                if (c3 > 1500 && c3 < 4500) id(pack8_cell_03_voltage).publish_state(c3 * 0.001f);
+                if (c4 > 1500 && c4 < 4500) id(pack8_cell_04_voltage).publish_state(c4 * 0.001f);
+              }
+      - can_id: 0x35A
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t c5 = x[0] | (x[1] << 8), c6 = x[2] | (x[3] << 8), c7 = x[4] | (x[5] << 8), c8 = x[6] | (x[7] << 8);
+                if (c5 > 1500 && c5 < 4500) id(pack8_cell_05_voltage).publish_state(c5 * 0.001f);
+                if (c6 > 1500 && c6 < 4500) id(pack8_cell_06_voltage).publish_state(c6 * 0.001f);
+                if (c7 > 1500 && c7 < 4500) id(pack8_cell_07_voltage).publish_state(c7 * 0.001f);
+                if (c8 > 1500 && c8 < 4500) id(pack8_cell_08_voltage).publish_state(c8 * 0.001f);
+              }
+      - can_id: 0x35B
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t c9 = x[0] | (x[1] << 8), c10 = x[2] | (x[3] << 8), c11 = x[4] | (x[5] << 8), c12 = x[6] | (x[7] << 8);
+                if (c9 > 1500 && c9 < 4500) id(pack8_cell_09_voltage).publish_state(c9 * 0.001f);
+                if (c10 > 1500 && c10 < 4500) id(pack8_cell_10_voltage).publish_state(c10 * 0.001f);
+                if (c11 > 1500 && c11 < 4500) id(pack8_cell_11_voltage).publish_state(c11 * 0.001f);
+                if (c12 > 1500 && c12 < 4500) id(pack8_cell_12_voltage).publish_state(c12 * 0.001f);
+              }
+      - can_id: 0x35C
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t c13 = x[0] | (x[1] << 8), c14 = x[2] | (x[3] << 8), c15 = x[4] | (x[5] << 8);
+                int16_t tmin_raw = (int16_t)(x[6] | (x[7] << 8));
+                if (c13 > 1500 && c13 < 4500) id(pack8_cell_13_voltage).publish_state(c13 * 0.001f);
+                if (c14 > 1500 && c14 < 4500) id(pack8_cell_14_voltage).publish_state(c14 * 0.001f);
+                if (c15 > 1500 && c15 < 4500) id(pack8_cell_15_voltage).publish_state(c15 * 0.001f);
+                if (tmin_raw > -400 && tmin_raw < 1000) id(pack8_min_cell_temp).publish_state(tmin_raw * 0.1f);
+              }
+
+interval:
+  - interval: 2000ms
+    then:
+      - lambda: |-
+          float soc = id(total_battery_system_soc).state;
+          float v = id(total_battery_system_voltage).state;
+          float i = id(total_battery_system_current).state;
+          float temp = id(max_battery_cell_temp).state;
+
+          // Auto-recover TWAI controller if it entered Bus-Off state during boot/hot-plug
+          twai_status_info_t status_info;
+          if (twai_get_status_info(&status_info) == ESP_OK) {
+            static uint32_t diag_cnt = 0;
+            if ((++diag_cnt % 5) == 0) {
+              ESP_LOGI("can_diag", "TWAI state=%d msgs_tx=%lu tec=%lu rec=%lu arb_lost=%lu bus_err=%lu",
+                       (int)status_info.state, (unsigned long)status_info.msgs_to_tx,
+                       (unsigned long)status_info.tx_error_counter, (unsigned long)status_info.rx_error_counter,
+                       (unsigned long)status_info.arb_lost_count, (unsigned long)status_info.bus_error_count);
+            }
+            if (status_info.state == TWAI_STATE_BUS_OFF) {
+              ESP_LOGW("can_diag", "TWAI in BUS_OFF (TEC=%lu, REC=%lu), initiating recovery...",
+                       (unsigned long)status_info.tx_error_counter, (unsigned long)status_info.rx_error_counter);
+              twai_initiate_recovery();
+            } else if (status_info.state == TWAI_STATE_STOPPED) {
+              ESP_LOGI("can_diag", "TWAI STOPPED after recovery, restarting twai_start()...");
+              twai_start();
+            } else if (status_info.msgs_to_tx >= 5) {
+              ESP_LOGW("can_diag", "TWAI TX queue full (msgs_tx=%lu, tec=%lu, rec=%lu), clearing TX queue...",
+                       (unsigned long)status_info.msgs_to_tx,
+                       (unsigned long)status_info.tx_error_counter, (unsigned long)status_info.rx_error_counter);
+              twai_clear_transmit_queue();
+            }
+          }
+
+          esphome::switch_::Switch* p_mon[8] = {
+            id(pack1_monitor), id(pack2_monitor), id(pack3_monitor), id(pack4_monitor),
+            id(pack5_monitor), id(pack6_monitor), id(pack7_monitor), id(pack8_monitor)
+          };
+          esphome::sensor::Sensor* p_v[8] = {
+            id(pack1_battery_voltage), id(pack2_battery_voltage), id(pack3_battery_voltage), id(pack4_battery_voltage),
+            id(pack5_battery_voltage), id(pack6_battery_voltage), id(pack7_battery_voltage), id(pack8_battery_voltage)
+          };
+          esphome::sensor::Sensor* p_i[8] = {
+            id(pack1_current), id(pack2_current), id(pack3_current), id(pack4_current),
+            id(pack5_current), id(pack6_current), id(pack7_current), id(pack8_current)
+          };
+          esphome::sensor::Sensor* p_soc[8] = {
+            id(pack1_state_of_charge), id(pack2_state_of_charge), id(pack3_state_of_charge), id(pack4_state_of_charge),
+            id(pack5_state_of_charge), id(pack6_state_of_charge), id(pack7_state_of_charge), id(pack8_state_of_charge)
+          };
+          esphome::sensor::Sensor* p_t[8] = {
+            id(pack1_max_cell_temp), id(pack2_max_cell_temp), id(pack3_max_cell_temp), id(pack4_max_cell_temp),
+            id(pack5_max_cell_temp), id(pack6_max_cell_temp), id(pack7_max_cell_temp), id(pack8_max_cell_temp)
+          };
+          esphome::sensor::Sensor* p_c[8][15] = {
+            {id(pack1_cell_01_voltage), id(pack1_cell_02_voltage), id(pack1_cell_03_voltage), id(pack1_cell_04_voltage), id(pack1_cell_05_voltage), id(pack1_cell_06_voltage), id(pack1_cell_07_voltage), id(pack1_cell_08_voltage), id(pack1_cell_09_voltage), id(pack1_cell_10_voltage), id(pack1_cell_11_voltage), id(pack1_cell_12_voltage), id(pack1_cell_13_voltage), id(pack1_cell_14_voltage), id(pack1_cell_15_voltage)},
+            {id(pack2_cell_01_voltage), id(pack2_cell_02_voltage), id(pack2_cell_03_voltage), id(pack2_cell_04_voltage), id(pack2_cell_05_voltage), id(pack2_cell_06_voltage), id(pack2_cell_07_voltage), id(pack2_cell_08_voltage), id(pack2_cell_09_voltage), id(pack2_cell_10_voltage), id(pack2_cell_11_voltage), id(pack2_cell_12_voltage), id(pack2_cell_13_voltage), id(pack2_cell_14_voltage), id(pack2_cell_15_voltage)},
+            {id(pack3_cell_01_voltage), id(pack3_cell_02_voltage), id(pack3_cell_03_voltage), id(pack3_cell_04_voltage), id(pack3_cell_05_voltage), id(pack3_cell_06_voltage), id(pack3_cell_07_voltage), id(pack3_cell_08_voltage), id(pack3_cell_09_voltage), id(pack3_cell_10_voltage), id(pack3_cell_11_voltage), id(pack3_cell_12_voltage), id(pack3_cell_13_voltage), id(pack3_cell_14_voltage), id(pack3_cell_15_voltage)},
+            {id(pack4_cell_01_voltage), id(pack4_cell_02_voltage), id(pack4_cell_03_voltage), id(pack4_cell_04_voltage), id(pack4_cell_05_voltage), id(pack4_cell_06_voltage), id(pack4_cell_07_voltage), id(pack4_cell_08_voltage), id(pack4_cell_09_voltage), id(pack4_cell_10_voltage), id(pack4_cell_11_voltage), id(pack4_cell_12_voltage), id(pack4_cell_13_voltage), id(pack4_cell_14_voltage), id(pack4_cell_15_voltage)},
+            {id(pack5_cell_01_voltage), id(pack5_cell_02_voltage), id(pack5_cell_03_voltage), id(pack5_cell_04_voltage), id(pack5_cell_05_voltage), id(pack5_cell_06_voltage), id(pack5_cell_07_voltage), id(pack5_cell_08_voltage), id(pack5_cell_09_voltage), id(pack5_cell_10_voltage), id(pack5_cell_11_voltage), id(pack5_cell_12_voltage), id(pack5_cell_13_voltage), id(pack5_cell_14_voltage), id(pack5_cell_15_voltage)},
+            {id(pack6_cell_01_voltage), id(pack6_cell_02_voltage), id(pack6_cell_03_voltage), id(pack6_cell_04_voltage), id(pack6_cell_05_voltage), id(pack6_cell_06_voltage), id(pack6_cell_07_voltage), id(pack6_cell_08_voltage), id(pack6_cell_09_voltage), id(pack6_cell_10_voltage), id(pack6_cell_11_voltage), id(pack6_cell_12_voltage), id(pack6_cell_13_voltage), id(pack6_cell_14_voltage), id(pack6_cell_15_voltage)},
+            {id(pack7_cell_01_voltage), id(pack7_cell_02_voltage), id(pack7_cell_03_voltage), id(pack7_cell_04_voltage), id(pack7_cell_05_voltage), id(pack7_cell_06_voltage), id(pack7_cell_07_voltage), id(pack7_cell_08_voltage), id(pack7_cell_09_voltage), id(pack7_cell_10_voltage), id(pack7_cell_11_voltage), id(pack7_cell_12_voltage), id(pack7_cell_13_voltage), id(pack7_cell_14_voltage), id(pack7_cell_15_voltage)},
+            {id(pack8_cell_01_voltage), id(pack8_cell_02_voltage), id(pack8_cell_03_voltage), id(pack8_cell_04_voltage), id(pack8_cell_05_voltage), id(pack8_cell_06_voltage), id(pack8_cell_07_voltage), id(pack8_cell_08_voltage), id(pack8_cell_09_voltage), id(pack8_cell_10_voltage), id(pack8_cell_11_voltage), id(pack8_cell_12_voltage), id(pack8_cell_13_voltage), id(pack8_cell_14_voltage), id(pack8_cell_15_voltage)}
+          };
+
+          // Evaluate live fresh packs and find both True Bank Averages & Worst-Pack Safety Floors
+          float min_soc = 100.0f;
+          float min_v = 100.0f;
+          uint16_t min_cell_mv = 9999;
+          float sum_soc = 0.0f;
+          float sum_v = 0.0f;
+          int active_soc_packs = 0;
+          int active_v_packs = 0;
+
+          for (int idx = 0; idx < 8; idx++) {
+            uint32_t max_age = (idx == 7) ? 30000 : 90000;
+            if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+
+            float psoc = p_soc[idx]->state;
+            float pv = p_v[idx]->state;
+            if (std::isfinite(psoc) && psoc >= 0.0f && psoc <= 100.0f) {
+              if (psoc < min_soc) min_soc = psoc;
+              sum_soc += psoc;
+              active_soc_packs++;
+            }
+            if (std::isfinite(pv) && pv > 20.0f && pv < 65.0f) {
+              if (pv < min_v) min_v = pv;
+              sum_v += pv;
+              active_v_packs++;
+            }
+            for (int c = 0; c < 15; c++) {
+              float cv = p_c[idx][c]->state;
+              if (std::isfinite(cv) && cv > 1.5f && cv < 4.5f) {
+                uint16_t cmv = (uint16_t)(cv * 1000.0f + 0.5f);
+                if (cmv < min_cell_mv) min_cell_mv = cmv;
+              }
+            }
+          }
+
+          // CRITICAL SAFETY GUARD: If zero packs have fresh Modbus/CAN telemetry, do NOT ping Board 109!
+          // This guarantees Board 109's 15s watchdog trips and switches Inverter to Grid if BMS bus freezes.
+          if (active_v_packs == 0 && active_soc_packs == 0) {
+            ESP_LOGW("bms_watchdog", "No fresh battery packs online! Suppressing CAN/UDP ping to Inverter Bridge.");
+            return;
+          }
+
+          if (isnan(soc) || isnan(v) || isnan(i) || isnan(temp)) return;
+
+          float avg_soc = (active_soc_packs > 0) ? (sum_soc / active_soc_packs) : soc;
+          float avg_v = (active_v_packs > 0) ? (sum_v / active_v_packs) : v;
+
+          // True Bank Capacity Algorithm with Top-of-Charge Balancing & Emergency Pack Floor:
+          // - Normal / Discharging: Report True Bank Average SOC (avg_soc) so all displays match actual bank energy.
+          // - Top-of-Charge (i > 1.5A and avg_soc >= 96%): Hold reported SOC at min_soc (capped <= 99%) until slowest pack reaches 99%+.
+          float target_soc = avg_soc;
+          if (i > 1.5f && avg_soc >= 96.0f && min_soc < 99.0f) {
+            target_soc = std::min(avg_soc, std::max(min_soc, 95.0f));
+          }
+
+          // Report True Bank Average Voltage normally; override with min_v only if any pack hits <= 46.5V emergency floor
+          float target_v = (min_v <= 46.5f) ? min_v : avg_v;
+          uint16_t min_v_100 = (min_v < 90.0f) ? (uint16_t)(min_v * 100.0f) : (uint16_t)(target_v * 100.0f);
+          uint16_t send_min_cell = (min_cell_mv < 9000) ? min_cell_mv : 0;
+
+          // 0x355: SOC & SOH
+          uint16_t soc_val = (uint16_t)(target_soc + 0.5f);
+          uint16_t soh_val = 100;
+          std::vector<uint8_t> d355 = {
+            (uint8_t)(soc_val & 0xFF), (uint8_t)((soc_val >> 8) & 0xFF),
+            (uint8_t)(soh_val & 0xFF), (uint8_t)((soh_val >> 8) & 0xFF)
+          };
+          id(interconnect_can_bus).send_data(0x355, false, d355);
+
+          // 0x356: Voltage (0.01V), Current (0.1A signed), Temp (0.1°C signed), MinPackV (0.01V)
+          int16_t v_100 = (int16_t)(target_v * 100.0f);
+          int16_t i_10 = (int16_t)(i * 10.0f);
+          int16_t t_10 = (int16_t)(temp * 10.0f);
+          std::vector<uint8_t> d356 = {
+            (uint8_t)(v_100 & 0xFF), (uint8_t)((v_100 >> 8) & 0xFF),
+            (uint8_t)(i_10 & 0xFF), (uint8_t)((i_10 >> 8) & 0xFF),
+            (uint8_t)(t_10 & 0xFF), (uint8_t)((t_10 >> 8) & 0xFF),
+            (uint8_t)(min_v_100 & 0xFF), (uint8_t)((min_v_100 >> 8) & 0xFF)
+          };
+          id(interconnect_can_bus).send_data(0x356, false, d356);
+
+          // Dual-Path Redundant UDP Broadcast to Board 109 (Persistent socket - Zero leak)
+          static int s_udp_109 = -1;
+          if (s_udp_109 < 0) {
+            s_udp_109 = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+            if (s_udp_109 >= 0) {
+              int flags = ::fcntl(s_udp_109, F_GETFL, 0);
+              ::fcntl(s_udp_109, F_SETFL, flags | O_NONBLOCK);
+            }
+          }
+          if (s_udp_109 >= 0) {
+            struct sockaddr_in dest_addr = {};
+            dest_addr.sin_family = AF_INET;
+            dest_addr.sin_port = htons(18888);
+            dest_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
+            uint8_t pkt[16] = {
+              0xAA, 0x55,
+              (uint8_t)(soc_val & 0xFF), (uint8_t)((soc_val >> 8) & 0xFF),
+              (uint8_t)(soh_val & 0xFF), (uint8_t)((soh_val >> 8) & 0xFF),
+              (uint8_t)(v_100 & 0xFF), (uint8_t)((v_100 >> 8) & 0xFF),
+              (uint8_t)(i_10 & 0xFF), (uint8_t)((i_10 >> 8) & 0xFF),
+              (uint8_t)(t_10 & 0xFF), (uint8_t)((t_10 >> 8) & 0xFF),
+              (uint8_t)(min_v_100 & 0xFF), (uint8_t)((min_v_100 >> 8) & 0xFF),
+              (uint8_t)(send_min_cell & 0xFF), (uint8_t)((send_min_cell >> 8) & 0xFF)
+            };
+            ::sendto(s_udp_109, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+          }
+
+          // Direct UDP Telemetry Broadcast to CYD Display (192.168.8.110:5005) & Board 109
+          static uint8_t s_seq = 0;
+          TcanTelemetryPacket cyd_pkt;
+          memset(&cyd_pkt, 0, sizeof(cyd_pkt));
+          cyd_pkt.magic = TCAN_MAGIC;
+          cyd_pkt.seq = s_seq++;
+          cyd_pkt.sys_soc_x10 = (int16_t)(avg_soc * 10.0f);
+          cyd_pkt.sys_v_x100 = (int16_t)(avg_v * 100.0f);
+          cyd_pkt.sys_i_x10 = i_10;
+          cyd_pkt.max_temp_x10 = t_10;
+
+          for (int k = 0; k < 8; k++) {
+            uint32_t max_age = (k == 7) ? 30000 : 90000;
+            bool fresh = p_mon[k]->state && is_pack_fresh(k, max_age);
+            float pv = p_v[k]->state;
+            float pi = p_i[k]->state;
+            float psoc = p_soc[k]->state;
+            float pt = p_t[k]->state;
+            bool online = fresh && ((std::isfinite(pv) && pv > 20.0f) || (std::isfinite(psoc) && psoc >= 0.0f));
+            cyd_pkt.packs[k].is_online = online ? 1 : 0;
+            if (online) {
+              cyd_pkt.packs[k].voltage_x100 = (int16_t)(pv * 100.0f);
+              cyd_pkt.packs[k].current_x10 = (int16_t)(pi * 10.0f);
+              cyd_pkt.packs[k].soc_x10 = (int16_t)(psoc * 10.0f);
+              cyd_pkt.packs[k].temp_x10 = (int16_t)(pt * 10.0f);
+              float cmin = 999.0f, cmax = -999.0f;
+              int valid_c = 0;
+              for (int c = 0; c < 15; c++) {
+                float cv = p_c[k][c]->state;
+                if (std::isfinite(cv) && cv > 1.5f && cv < 4.5f) {
+                  if (cv < cmin) cmin = cv;
+                  if (cv > cmax) cmax = cv;
+                  cyd_pkt.packs[k].cells_mv[c] = (uint16_t)(cv * 1000.0f + 0.5f);
+                  valid_c++;
+                } else {
+                  cyd_pkt.packs[k].cells_mv[c] = 0;
+                }
+              }
+              if (valid_c >= 10) {
+                cyd_pkt.packs[k].delta_mv = (int16_t)((cmax - cmin) * 1000.0f);
+              } else {
+                cyd_pkt.packs[k].delta_mv = 0;
+              }
+            }
+          }
+          tcan_broadcast_telemetry(cyd_pkt);
+
+modbus:
+  - id: modbus_bms
+    uart_id: uart_bms
+    send_wait_time: 1500ms
+    turnaround_time: 80ms
+
+  - id: modbus_pack4
+    uart_id: uart_pack4
+    send_wait_time: 1500ms
+    turnaround_time: 80ms
+
+# ------------------------------------------------------------------------------
+# Modbus Controllers — 8 Packs (Slave IDs 214 - 221)
+# ------------------------------------------------------------------------------
+modbus_controller:
+  - id: huawei_esm_pack1
+    modbus_id: modbus_bms
+    address: 214
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack2
+    modbus_id: modbus_bms
+    address: 215
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack3
+    modbus_id: modbus_bms
+    address: 216
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack4
+    modbus_id: modbus_pack4
+    address: 214
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack5
+    modbus_id: modbus_bms
+    address: 217
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack6
+    modbus_id: modbus_bms
+    address: 218
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+  - id: huawei_esm_pack7
+    modbus_id: modbus_bms
+    address: 219
+    update_interval: never
+    command_throttle: 300ms
+    max_cmd_retries: 2
+    setup_priority: -10
+# ------------------------------------------------------------------------------
+# Hardware Switches & Pack Active Toggles (Home Assistant Controllable)
+# ------------------------------------------------------------------------------
+switch:
+  - platform: gpio
+    pin: {number: GPIO16, inverted: false}
+    id: rs485_power
+    name: "RS485 Power Enable"
+    restore_mode: ALWAYS_ON
+    setup_priority: 600.0
+
+  - platform: gpio
+    pin: {number: GPIO19, inverted: false}
+    id: rs485_chip_enable
+    name: "RS485 Chip Enable"
+    restore_mode: ALWAYS_OFF
+    setup_priority: 600.0
+
+  - platform: gpio
+    pin: {number: GPIO17, inverted: false}
+    id: rs485_autodirection
+    name: "RS485 Auto Direction Enable"
+    restore_mode: ALWAYS_OFF
+    setup_priority: 600.0
+
+  - platform: gpio
+    pin: {number: GPIO23, inverted: false}
+    id: can_power
+    name: "CAN High Speed Enable (Low = Active)"
+    restore_mode: ALWAYS_OFF
+    setup_priority: 600.0
+
+
+  - platform: template
+    name: "Pack 1 Monitor Enable"
+    id: pack1_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 2 Monitor Enable"
+    id: pack2_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 3 Monitor Enable"
+    id: pack3_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 4 Monitor Enable"
+    id: pack4_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 5 Monitor Enable"
+    id: pack5_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 6 Monitor Enable"
+    id: pack6_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 7 Monitor Enable"
+    id: pack7_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+  - platform: template
+    name: "Pack 8 Monitor Enable"
+    id: pack8_monitor
+    icon: "mdi:battery-sync"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+# ------------------------------------------------------------------------------
+# Onboard Status LED (WS2812 RGB LED)
+# ------------------------------------------------------------------------------
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    rgb_order: GRB
+    pin: GPIO04
+    num_leds: 1
+    name: "Board Status LED"
+    id: board_status_led
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+
+# ------------------------------------------------------------------------------
+# SNTP Real-Time Clock (Asia/Bangkok) for Daily Log Rotation & Timestamping
+# ------------------------------------------------------------------------------
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Asia/Bangkok"
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - time.google.com
+
+# ------------------------------------------------------------------------------
+# MicroSD Logging: DISABLED on Board 108 (Centralized to Board 109 exclusively)
+# ------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------------------
+# Time-Division Multiplexing Polling Engine + Activity Blink Script
+# ------------------------------------------------------------------------------
+script:
+  - id: flash_activity_led
+    mode: restart
+    then:
+      - light.turn_on:
+          id: board_status_led
+          red: 0.0
+          green: 1.0
+          blue: 0.0
+          brightness: 100%
+          transition_length: 0s
+      - delay: 80ms
+      - light.turn_off:
+          id: board_status_led
+          transition_length: 0s
+
+  - id: modbus_polling_loop
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: 'return true;'
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(pack1_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack1).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack2_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack2).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack3_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack3).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack4_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack4).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack5_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack5).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack6_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack6).update();'
+                  - script.execute: flash_activity_led
+                  - delay: 5000ms
+            - if:
+                condition:
+                  lambda: 'return id(pack7_monitor).state;'
+                then:
+                  - lambda: 'id(huawei_esm_pack7).update();'
+                  - script.execute: flash_activity_led
+            - delay: 1000ms
+
+  # --- ESN/BarCode Reader for Pack 4 (Isolated Bus on uart_pack4, Slave ID 0xD6) ---
+  - id: read_esn_pack4
+    mode: single
+    then:
+      - script.stop: modbus_polling_loop
+      - delay: 2000ms
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: === PACK 4 (0xD6 on uart_pack4) ==="
+      # Step 1: UploadStartCommand
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x05, 0x01, 0x04, 0x69, 0xBC]
+      - delay: 1000ms
+      # Step 2: UploadDataCommand Block 0
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x00, 0x6A, 0x59]
+      - delay: 1000ms
+      # Step 3: UploadDataCommand Block 1
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x01, 0xAB, 0x99]
+      - delay: 1000ms
+      # Step 4: UploadDataFinish
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x0C, 0x01, 0x04, 0xB9, 0xBE]
+      - delay: 1500ms
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: Pack 4 read complete!"
+      - script.execute: modbus_polling_loop
+
+  # --- ESN/BarCode Reader for ALL Packs ---
+  - id: read_esn_all
+    mode: single
+    then:
+      - script.stop: modbus_polling_loop
+      - delay: 2000ms
+      # ==================== PACK 4 (uart_pack4, 0xD6) ====================
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: === PACK 4 (0xD6 on uart_pack4) ==="
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x05, 0x01, 0x04, 0x69, 0xBC]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x00, 0x6A, 0x59]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x01, 0xAB, 0x99]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x41, 0x0C, 0x01, 0x04, 0xB9, 0xBE]
+      - delay: 1500ms
+      # ==================== PACK 1 (uart_bms, 0xD6) ====================
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: === PACK 1 (0xD6 on uart_bms) ==="
+      - uart.write:
+          id: uart_bms
+          data: [0xD6, 0x41, 0x05, 0x01, 0x04, 0x69, 0xBC]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x00, 0x6A, 0x59]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD6, 0x41, 0x06, 0x03, 0x04, 0x00, 0x01, 0xAB, 0x99]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD6, 0x41, 0x0C, 0x01, 0x04, 0xB9, 0xBE]
+      - delay: 1500ms
+      # ==================== PACK 2 (uart_bms, 0xD7) ====================
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: === PACK 2 (0xD7 on uart_bms) ==="
+      - uart.write:
+          id: uart_bms
+          data: [0xD7, 0x41, 0x05, 0x01, 0x04, 0x54, 0x7C]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD7, 0x41, 0x06, 0x03, 0x04, 0x00, 0x00, 0x7A, 0x99]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD7, 0x41, 0x06, 0x03, 0x04, 0x00, 0x01, 0xBB, 0x59]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD7, 0x41, 0x0C, 0x01, 0x04, 0x84, 0x7E]
+      - delay: 1500ms
+      # ==================== PACK 3 (uart_bms, 0xD8) ====================
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: === PACK 3 (0xD8 on uart_bms) ==="
+      - uart.write:
+          id: uart_bms
+          data: [0xD8, 0x41, 0x05, 0x01, 0x04, 0x00, 0x7D]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD8, 0x41, 0x06, 0x03, 0x04, 0x00, 0x00, 0x85, 0x99]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD8, 0x41, 0x06, 0x03, 0x04, 0x00, 0x01, 0x44, 0x59]
+      - delay: 1000ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD8, 0x41, 0x0C, 0x01, 0x04, 0xD0, 0x7F]
+      - delay: 1500ms
+      - logger.log:
+          level: WARN
+          format: ">>> ESN READ: All packs read complete!"
+      - script.execute: modbus_polling_loop
+
+button:
+  - platform: template
+    name: "Read Pack 4 ESN (BarCode)"
+    id: btn_read_pack4_esn
+    icon: "mdi:barcode-scan"
+    on_press:
+      - script.execute: read_esn_pack4
+
+  - platform: template
+    name: "Read All Packs ESN (BarCode)"
+    id: btn_read_all_esn
+    icon: "mdi:barcode-scan"
+    on_press:
+      - script.execute: read_esn_all
+
+# ------------------------------------------------------------------------------
+# Modbus Sensors — Huawei ESM-48100B1 (Pack 1 to 8 + Individual Cell Voltages)
+# ------------------------------------------------------------------------------
+sensor:
+  # System Health Sensors
+  - platform: template
+    name: "ESP32 Free Heap"
+    id: esp32_free_heap
+    unit_of_measurement: "B"
+    accuracy_decimals: 0
+    icon: "mdi:memory"
+    lambda: |-
+      return (float)esp_get_free_heap_size();
+    update_interval: 10s
+
+  # ==================== Pack 1 (Slave ID: 214) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Busbar Voltage"
+    id: pack1_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Battery Voltage"
+    id: pack1_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(0);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Current"
+    id: pack1_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 State of Charge"
+    id: pack1_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 State of Health"
+    id: pack1_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Max Cell Temperature"
+    id: pack1_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Min Cell Temperature"
+    id: pack1_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 BMS Operating Mode"
+    id: pack1_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Fault Reg 0x46"
+    id: pack1_fault_reg_0x46
+    register_type: holding
+    address: 0x0046
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell Fault Reg 0x47"
+    id: pack1_cell_fault_reg_0x47
+    register_type: holding
+    address: 0x0047
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Protect Reg 0x48"
+    id: pack1_protect_reg_0x48
+    register_type: holding
+    address: 0x0048
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Warning Reg 0x49"
+    id: pack1_warning_reg_0x49
+    register_type: holding
+    address: 0x0049
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Protect Reg 0x4A"
+    id: pack1_protect_reg_0x4a
+    register_type: holding
+    address: 0x004A
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Nominal Capacity"
+    id: pack1_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Total Discharged Energy"
+    id: pack1_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 01 Voltage"
+    id: pack1_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 02 Voltage"
+    id: pack1_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 03 Voltage"
+    id: pack1_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 04 Voltage"
+    id: pack1_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 05 Voltage"
+    id: pack1_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 06 Voltage"
+    id: pack1_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 07 Voltage"
+    id: pack1_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 08 Voltage"
+    id: pack1_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 09 Voltage"
+    id: pack1_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 10 Voltage"
+    id: pack1_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 11 Voltage"
+    id: pack1_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 12 Voltage"
+    id: pack1_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 13 Voltage"
+    id: pack1_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 14 Voltage"
+    id: pack1_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack1
+    name: "Pack 1 Cell 15 Voltage"
+    id: pack1_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 2 (Slave ID: 215) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Busbar Voltage"
+    id: pack2_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Battery Voltage"
+    id: pack2_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(1);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Current"
+    id: pack2_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 State of Charge"
+    id: pack2_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 State of Health"
+    id: pack2_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Max Cell Temperature"
+    id: pack2_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Min Cell Temperature"
+    id: pack2_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 BMS Operating Mode"
+    id: pack2_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Fault Reg 0x46"
+    id: pack2_fault_reg_0x46
+    register_type: holding
+    address: 0x0046
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell Fault Reg 0x47"
+    id: pack2_cell_fault_reg_0x47
+    register_type: holding
+    address: 0x0047
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Protect Reg 0x48"
+    id: pack2_protect_reg_0x48
+    register_type: holding
+    address: 0x0048
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Warning Reg 0x49"
+    id: pack2_warning_reg_0x49
+    register_type: holding
+    address: 0x0049
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Protect Reg 0x4A"
+    id: pack2_protect_reg_0x4a
+    register_type: holding
+    address: 0x004A
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Nominal Capacity"
+    id: pack2_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Total Discharged Energy"
+    id: pack2_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 01 Voltage"
+    id: pack2_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 02 Voltage"
+    id: pack2_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 03 Voltage"
+    id: pack2_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 04 Voltage"
+    id: pack2_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 05 Voltage"
+    id: pack2_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 06 Voltage"
+    id: pack2_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 07 Voltage"
+    id: pack2_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 08 Voltage"
+    id: pack2_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 09 Voltage"
+    id: pack2_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 10 Voltage"
+    id: pack2_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 11 Voltage"
+    id: pack2_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 12 Voltage"
+    id: pack2_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 13 Voltage"
+    id: pack2_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 14 Voltage"
+    id: pack2_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack2
+    name: "Pack 2 Cell 15 Voltage"
+    id: pack2_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 3 (Slave ID: 216) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Busbar Voltage"
+    id: pack3_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Battery Voltage"
+    id: pack3_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(2);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Current"
+    id: pack3_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 State of Charge"
+    id: pack3_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 State of Health"
+    id: pack3_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Max Cell Temperature"
+    id: pack3_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Min Cell Temperature"
+    id: pack3_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 BMS Operating Mode"
+    id: pack3_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Nominal Capacity"
+    id: pack3_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Total Discharged Energy"
+    id: pack3_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 01 Voltage"
+    id: pack3_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 02 Voltage"
+    id: pack3_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 03 Voltage"
+    id: pack3_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 04 Voltage"
+    id: pack3_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 05 Voltage"
+    id: pack3_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 06 Voltage"
+    id: pack3_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 07 Voltage"
+    id: pack3_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 08 Voltage"
+    id: pack3_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 09 Voltage"
+    id: pack3_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 10 Voltage"
+    id: pack3_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 11 Voltage"
+    id: pack3_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 12 Voltage"
+    id: pack3_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 13 Voltage"
+    id: pack3_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 14 Voltage"
+    id: pack3_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack3
+    name: "Pack 3 Cell 15 Voltage"
+    id: pack3_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 4 (Slave ID: 217) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Busbar Voltage"
+    id: pack4_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Battery Voltage"
+    id: pack4_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(3);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Current"
+    id: pack4_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 State of Charge"
+    id: pack4_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 State of Health"
+    id: pack4_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Max Cell Temperature"
+    id: pack4_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Min Cell Temperature"
+    id: pack4_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 BMS Operating Mode"
+    id: pack4_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Nominal Capacity"
+    id: pack4_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Total Discharged Energy"
+    id: pack4_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 01 Voltage"
+    id: pack4_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 02 Voltage"
+    id: pack4_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 03 Voltage"
+    id: pack4_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 04 Voltage"
+    id: pack4_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 05 Voltage"
+    id: pack4_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 06 Voltage"
+    id: pack4_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 07 Voltage"
+    id: pack4_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 08 Voltage"
+    id: pack4_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 09 Voltage"
+    id: pack4_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 10 Voltage"
+    id: pack4_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 11 Voltage"
+    id: pack4_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 12 Voltage"
+    id: pack4_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 13 Voltage"
+    id: pack4_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 14 Voltage"
+    id: pack4_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 Cell 15 Voltage"
+    id: pack4_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 5 (Slave ID: 218) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Busbar Voltage"
+    id: pack5_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Battery Voltage"
+    id: pack5_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(4);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Current"
+    id: pack5_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 State of Charge"
+    id: pack5_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 State of Health"
+    id: pack5_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Max Cell Temperature"
+    id: pack5_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Min Cell Temperature"
+    id: pack5_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 BMS Operating Mode"
+    id: pack5_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Nominal Capacity"
+    id: pack5_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Total Discharged Energy"
+    id: pack5_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 01 Voltage"
+    id: pack5_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 02 Voltage"
+    id: pack5_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 03 Voltage"
+    id: pack5_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 04 Voltage"
+    id: pack5_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 05 Voltage"
+    id: pack5_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 06 Voltage"
+    id: pack5_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 07 Voltage"
+    id: pack5_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 08 Voltage"
+    id: pack5_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 09 Voltage"
+    id: pack5_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 10 Voltage"
+    id: pack5_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 11 Voltage"
+    id: pack5_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 12 Voltage"
+    id: pack5_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 13 Voltage"
+    id: pack5_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 14 Voltage"
+    id: pack5_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack5
+    name: "Pack 5 Cell 15 Voltage"
+    id: pack5_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 6 (Slave ID: 219) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Busbar Voltage"
+    id: pack6_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Battery Voltage"
+    id: pack6_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(5);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Current"
+    id: pack6_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 State of Charge"
+    id: pack6_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 State of Health"
+    id: pack6_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Max Cell Temperature"
+    id: pack6_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Min Cell Temperature"
+    id: pack6_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 BMS Operating Mode"
+    id: pack6_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Nominal Capacity"
+    id: pack6_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Total Discharged Energy"
+    id: pack6_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 01 Voltage"
+    id: pack6_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 02 Voltage"
+    id: pack6_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 03 Voltage"
+    id: pack6_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 04 Voltage"
+    id: pack6_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 05 Voltage"
+    id: pack6_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 06 Voltage"
+    id: pack6_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 07 Voltage"
+    id: pack6_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 08 Voltage"
+    id: pack6_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 09 Voltage"
+    id: pack6_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 10 Voltage"
+    id: pack6_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 11 Voltage"
+    id: pack6_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 12 Voltage"
+    id: pack6_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 13 Voltage"
+    id: pack6_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 14 Voltage"
+    id: pack6_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack6
+    name: "Pack 6 Cell 15 Voltage"
+    id: pack6_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 7 (Slave ID: 220) ====================
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Busbar Voltage"
+    id: pack7_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Battery Voltage"
+    id: pack7_battery_voltage
+    register_type: holding
+    address: 0x0001
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+      - lambda: |-
+          if (x > 20.0f && x < 65.0f) mark_pack_rx_fresh(6);
+          return x;
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Current"
+    id: pack7_current
+    register_type: holding
+    address: 0x0002
+    value_type: S_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 State of Charge"
+    id: pack7_state_of_charge
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:battery-medium"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 State of Health"
+    id: pack7_state_of_health
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Max Cell Temperature"
+    id: pack7_max_cell_temp
+    register_type: holding
+    address: 0x0005
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Min Cell Temperature"
+    id: pack7_min_cell_temp
+    register_type: holding
+    address: 0x0006
+    value_type: S_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 BMS Operating Mode"
+    id: pack7_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Nominal Capacity"
+    id: pack7_nominal_capacity
+    register_type: holding
+    address: 0x0107
+    value_type: U_WORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Ah"
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Total Discharged Energy"
+    id: pack7_total_discharged_energy
+    register_type: holding
+    address: 0x0342
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 01 Voltage"
+    id: pack7_cell_01_voltage
+    register_type: holding
+    address: 0x0022
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 02 Voltage"
+    id: pack7_cell_02_voltage
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 03 Voltage"
+    id: pack7_cell_03_voltage
+    register_type: holding
+    address: 0x0024
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 04 Voltage"
+    id: pack7_cell_04_voltage
+    register_type: holding
+    address: 0x0025
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 05 Voltage"
+    id: pack7_cell_05_voltage
+    register_type: holding
+    address: 0x0026
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 06 Voltage"
+    id: pack7_cell_06_voltage
+    register_type: holding
+    address: 0x0027
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 07 Voltage"
+    id: pack7_cell_07_voltage
+    register_type: holding
+    address: 0x0028
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 08 Voltage"
+    id: pack7_cell_08_voltage
+    register_type: holding
+    address: 0x0029
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 09 Voltage"
+    id: pack7_cell_09_voltage
+    register_type: holding
+    address: 0x002A
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 10 Voltage"
+    id: pack7_cell_10_voltage
+    register_type: holding
+    address: 0x002B
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 11 Voltage"
+    id: pack7_cell_11_voltage
+    register_type: holding
+    address: 0x002C
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 12 Voltage"
+    id: pack7_cell_12_voltage
+    register_type: holding
+    address: 0x002D
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 13 Voltage"
+    id: pack7_cell_13_voltage
+    register_type: holding
+    address: 0x002E
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 14 Voltage"
+    id: pack7_cell_14_voltage
+    register_type: holding
+    address: 0x002F
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack7
+    name: "Pack 7 Cell 15 Voltage"
+    id: pack7_cell_15_voltage
+    register_type: holding
+    address: 0x0030
+    value_type: U_WORD
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.001
+  # ==================== Pack 8 (Bridged via CAN 0x358 from Board 109) ====================
+  - platform: template
+    name: "Pack 8 Busbar Voltage"
+    id: pack8_busbar_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 1
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Battery Voltage"
+    id: pack8_battery_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Current"
+    id: pack8_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 State of Charge"
+    id: pack8_state_of_charge
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:battery-medium"
+    device_class: battery
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 State of Health"
+    id: pack8_state_of_health
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:heart-pulse"
+    device_class: battery
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Max Cell Temperature"
+    id: pack8_max_cell_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Min Cell Temperature"
+    id: pack8_min_cell_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 BMS Operating Mode"
+    id: pack8_bms_operating_mode
+    accuracy_decimals: 0
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Nominal Capacity"
+    id: pack8_nominal_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 0
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Total Discharged Energy"
+    id: pack8_total_discharged_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 01 Voltage"
+    id: pack8_cell_01_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 02 Voltage"
+    id: pack8_cell_02_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 03 Voltage"
+    id: pack8_cell_03_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 04 Voltage"
+    id: pack8_cell_04_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 05 Voltage"
+    id: pack8_cell_05_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 06 Voltage"
+    id: pack8_cell_06_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 07 Voltage"
+    id: pack8_cell_07_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 08 Voltage"
+    id: pack8_cell_08_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 09 Voltage"
+    id: pack8_cell_09_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 10 Voltage"
+    id: pack8_cell_10_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 11 Voltage"
+    id: pack8_cell_11_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 12 Voltage"
+    id: pack8_cell_12_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 13 Voltage"
+    id: pack8_cell_13_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 14 Voltage"
+    id: pack8_cell_14_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+
+  - platform: template
+    name: "Pack 8 Cell 15 Voltage"
+    id: pack8_cell_15_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: never
+  # ==================== Individual Pack Remaining Capacities ====================
+  - platform: template
+    name: "Pack 1 Remaining Capacity"
+    id: pack1_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack1_monitor).state && !isnan(id(pack1_state_of_charge).state)) {
+        float nom = (!isnan(id(pack1_nominal_capacity).state) && id(pack1_nominal_capacity).state > 10.0f) ? id(pack1_nominal_capacity).state : 100.0f;
+        return (id(pack1_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 2 Remaining Capacity"
+    id: pack2_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack2_monitor).state && !isnan(id(pack2_state_of_charge).state)) {
+        float nom = (!isnan(id(pack2_nominal_capacity).state) && id(pack2_nominal_capacity).state > 10.0f) ? id(pack2_nominal_capacity).state : 100.0f;
+        return (id(pack2_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 3 Remaining Capacity"
+    id: pack3_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack3_monitor).state && !isnan(id(pack3_state_of_charge).state)) {
+        float nom = (!isnan(id(pack3_nominal_capacity).state) && id(pack3_nominal_capacity).state > 10.0f) ? id(pack3_nominal_capacity).state : 100.0f;
+        return (id(pack3_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 4 Remaining Capacity"
+    id: pack4_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack4_monitor).state && !isnan(id(pack4_state_of_charge).state)) {
+        float nom = (!isnan(id(pack4_nominal_capacity).state) && id(pack4_nominal_capacity).state > 10.0f) ? id(pack4_nominal_capacity).state : 100.0f;
+        return (id(pack4_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 5 Remaining Capacity"
+    id: pack5_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack5_monitor).state && !isnan(id(pack5_state_of_charge).state)) {
+        float nom = (!isnan(id(pack5_nominal_capacity).state) && id(pack5_nominal_capacity).state > 10.0f) ? id(pack5_nominal_capacity).state : 100.0f;
+        return (id(pack5_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 6 Remaining Capacity"
+    id: pack6_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack6_monitor).state && !isnan(id(pack6_state_of_charge).state)) {
+        float nom = (!isnan(id(pack6_nominal_capacity).state) && id(pack6_nominal_capacity).state > 10.0f) ? id(pack6_nominal_capacity).state : 100.0f;
+        return (id(pack6_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 7 Remaining Capacity"
+    id: pack7_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack7_monitor).state && !isnan(id(pack7_state_of_charge).state)) {
+        float nom = (!isnan(id(pack7_nominal_capacity).state) && id(pack7_nominal_capacity).state > 10.0f) ? id(pack7_nominal_capacity).state : 100.0f;
+        return (id(pack7_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Pack 8 Remaining Capacity"
+    id: pack8_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    icon: "mdi:battery-plus"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (id(pack8_monitor).state && !isnan(id(pack8_state_of_charge).state)) {
+        float nom = (!isnan(id(pack8_nominal_capacity).state) && id(pack8_nominal_capacity).state > 10.0f) ? id(pack8_nominal_capacity).state : 100.0f;
+        return (id(pack8_state_of_charge).state * nom) / 100.0f;
+      }
+      return NAN;
+
+  - platform: template
+    name: "Total Battery System SOH"
+    id: total_battery_system_soh
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float total_soh = 0.0;
+      int count = 0;
+      if (id(pack1_monitor).state && !isnan(id(pack1_state_of_health).state)) { total_soh += id(pack1_state_of_health).state; count++; }
+      if (id(pack2_monitor).state && !isnan(id(pack2_state_of_health).state)) { total_soh += id(pack2_state_of_health).state; count++; }
+      if (id(pack3_monitor).state && !isnan(id(pack3_state_of_health).state)) { total_soh += id(pack3_state_of_health).state; count++; }
+      if (id(pack4_monitor).state && !isnan(id(pack4_state_of_health).state)) { total_soh += id(pack4_state_of_health).state; count++; }
+      if (id(pack5_monitor).state && !isnan(id(pack5_state_of_health).state)) { total_soh += id(pack5_state_of_health).state; count++; }
+      if (id(pack6_monitor).state && !isnan(id(pack6_state_of_health).state)) { total_soh += id(pack6_state_of_health).state; count++; }
+      if (id(pack7_monitor).state && !isnan(id(pack7_state_of_health).state)) { total_soh += id(pack7_state_of_health).state; count++; }
+      if (id(pack8_monitor).state && !isnan(id(pack8_state_of_health).state)) { total_soh += id(pack8_state_of_health).state; count++; }
+      return (count > 0) ? (total_soh / count) : 100.0;
+
+  # ==================== System Aggregated Sensors ====================
+  - platform: template
+    name: "Total Battery System SOC"
+    id: total_battery_system_soc
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    device_class: battery
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float total_soc = 0.0f;
+      int count = 0;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_state_of_charge).state) && id(pack1_state_of_charge).state >= 0.0f && id(pack1_state_of_charge).state <= 100.0f) { total_soc += id(pack1_state_of_charge).state; count++; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_state_of_charge).state) && id(pack2_state_of_charge).state >= 0.0f && id(pack2_state_of_charge).state <= 100.0f) { total_soc += id(pack2_state_of_charge).state; count++; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_state_of_charge).state) && id(pack3_state_of_charge).state >= 0.0f && id(pack3_state_of_charge).state <= 100.0f) { total_soc += id(pack3_state_of_charge).state; count++; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_state_of_charge).state) && id(pack4_state_of_charge).state >= 0.0f && id(pack4_state_of_charge).state <= 100.0f) { total_soc += id(pack4_state_of_charge).state; count++; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_state_of_charge).state) && id(pack5_state_of_charge).state >= 0.0f && id(pack5_state_of_charge).state <= 100.0f) { total_soc += id(pack5_state_of_charge).state; count++; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_state_of_charge).state) && id(pack6_state_of_charge).state >= 0.0f && id(pack6_state_of_charge).state <= 100.0f) { total_soc += id(pack6_state_of_charge).state; count++; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_state_of_charge).state) && id(pack7_state_of_charge).state >= 0.0f && id(pack7_state_of_charge).state <= 100.0f) { total_soc += id(pack7_state_of_charge).state; count++; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_state_of_charge).state) && id(pack8_state_of_charge).state >= 0.0f && id(pack8_state_of_charge).state <= 100.0f) { total_soc += id(pack8_state_of_charge).state; count++; }
+      return (count > 0) ? (total_soc / count) : NAN;
+
+  - platform: template
+    name: "Total Battery System Voltage"
+    id: total_battery_system_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float total_v = 0.0f;
+      int count = 0;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_battery_voltage).state) && id(pack1_battery_voltage).state > 20.0f) { total_v += id(pack1_battery_voltage).state; count++; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_battery_voltage).state) && id(pack2_battery_voltage).state > 20.0f) { total_v += id(pack2_battery_voltage).state; count++; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_battery_voltage).state) && id(pack3_battery_voltage).state > 20.0f) { total_v += id(pack3_battery_voltage).state; count++; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_battery_voltage).state) && id(pack4_battery_voltage).state > 20.0f) { total_v += id(pack4_battery_voltage).state; count++; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_battery_voltage).state) && id(pack5_battery_voltage).state > 20.0f) { total_v += id(pack5_battery_voltage).state; count++; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_battery_voltage).state) && id(pack6_battery_voltage).state > 20.0f) { total_v += id(pack6_battery_voltage).state; count++; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_battery_voltage).state) && id(pack7_battery_voltage).state > 20.0f) { total_v += id(pack7_battery_voltage).state; count++; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_battery_voltage).state) && id(pack8_battery_voltage).state > 20.0f) { total_v += id(pack8_battery_voltage).state; count++; }
+      return (count > 0) ? (total_v / count) : NAN;
+
+  - platform: template
+    name: "Total Battery System Current"
+    id: total_battery_system_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float total_i = 0.0f;
+      int count = 0;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_current).state)) { total_i += id(pack1_current).state; count++; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_current).state)) { total_i += id(pack2_current).state; count++; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_current).state)) { total_i += id(pack3_current).state; count++; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_current).state)) { total_i += id(pack4_current).state; count++; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_current).state)) { total_i += id(pack5_current).state; count++; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_current).state)) { total_i += id(pack6_current).state; count++; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_current).state)) { total_i += id(pack7_current).state; count++; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_current).state)) { total_i += id(pack8_current).state; count++; }
+      return (count > 0) ? total_i : NAN;
+
+  - platform: template
+    name: "Total Battery System Power"
+    id: total_battery_system_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      return id(total_battery_system_voltage).state * id(total_battery_system_current).state;
+
+  - platform: template
+    name: "Total Battery System Remaining Capacity"
+    id: total_battery_system_remaining_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 1
+    state_class: measurement
+    icon: "mdi:battery-plus"
+    update_interval: 2s
+    lambda: |-
+      float total_cap = 0.0f;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_remaining_capacity).state)) total_cap += id(pack1_remaining_capacity).state;
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_remaining_capacity).state)) total_cap += id(pack2_remaining_capacity).state;
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_remaining_capacity).state)) total_cap += id(pack3_remaining_capacity).state;
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_remaining_capacity).state)) total_cap += id(pack4_remaining_capacity).state;
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_remaining_capacity).state)) total_cap += id(pack5_remaining_capacity).state;
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_remaining_capacity).state)) total_cap += id(pack6_remaining_capacity).state;
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_remaining_capacity).state)) total_cap += id(pack7_remaining_capacity).state;
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_remaining_capacity).state)) total_cap += id(pack8_remaining_capacity).state;
+      return total_cap;
+
+  - platform: template
+    name: "Total Battery System Discharged Energy"
+    id: total_battery_system_discharged_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+    icon: "mdi:battery-arrow-down"
+    update_interval: 10s
+    lambda: |-
+      float total_wh = 0.0f;
+      int count = 0;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_total_discharged_energy).state) && id(pack1_total_discharged_energy).state > 0) { total_wh += id(pack1_total_discharged_energy).state; count++; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_total_discharged_energy).state) && id(pack2_total_discharged_energy).state > 0) { total_wh += id(pack2_total_discharged_energy).state; count++; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_total_discharged_energy).state) && id(pack3_total_discharged_energy).state > 0) { total_wh += id(pack3_total_discharged_energy).state; count++; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_total_discharged_energy).state) && id(pack4_total_discharged_energy).state > 0) { total_wh += id(pack4_total_discharged_energy).state; count++; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_total_discharged_energy).state) && id(pack5_total_discharged_energy).state > 0) { total_wh += id(pack5_total_discharged_energy).state; count++; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_total_discharged_energy).state) && id(pack6_total_discharged_energy).state > 0) { total_wh += id(pack6_total_discharged_energy).state; count++; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_total_discharged_energy).state) && id(pack7_total_discharged_energy).state > 0) { total_wh += id(pack7_total_discharged_energy).state; count++; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 90000) && !isnan(id(pack8_total_discharged_energy).state) && id(pack8_total_discharged_energy).state > 0) { total_wh += id(pack8_total_discharged_energy).state; count++; }
+      return (count > 0) ? total_wh : NAN;
+
+  - platform: template
+    name: "Total Battery System Nominal Capacity"
+    id: total_battery_system_nominal_capacity
+    unit_of_measurement: "Ah"
+    accuracy_decimals: 0
+    state_class: measurement
+    icon: "mdi:battery-check"
+    update_interval: 2s
+    lambda: |-
+      float total_nom = 0.0f;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000)) { float nom = (!isnan(id(pack1_nominal_capacity).state) && id(pack1_nominal_capacity).state > 10.0f) ? id(pack1_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000)) { float nom = (!isnan(id(pack2_nominal_capacity).state) && id(pack2_nominal_capacity).state > 10.0f) ? id(pack2_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000)) { float nom = (!isnan(id(pack3_nominal_capacity).state) && id(pack3_nominal_capacity).state > 10.0f) ? id(pack3_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000)) { float nom = (!isnan(id(pack4_nominal_capacity).state) && id(pack4_nominal_capacity).state > 10.0f) ? id(pack4_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000)) { float nom = (!isnan(id(pack5_nominal_capacity).state) && id(pack5_nominal_capacity).state > 10.0f) ? id(pack5_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000)) { float nom = (!isnan(id(pack6_nominal_capacity).state) && id(pack6_nominal_capacity).state > 10.0f) ? id(pack6_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000)) { float nom = (!isnan(id(pack7_nominal_capacity).state) && id(pack7_nominal_capacity).state > 10.0f) ? id(pack7_nominal_capacity).state : 100.0f; total_nom += nom; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000)) { float nom = (!isnan(id(pack8_nominal_capacity).state) && id(pack8_nominal_capacity).state > 10.0f) ? id(pack8_nominal_capacity).state : 100.0f; total_nom += nom; }
+      return (total_nom > 0.0f) ? total_nom : 800.0f;
+
+  - platform: template
+    name: "Max Battery Cell Temperature"
+    id: max_battery_cell_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 0
+    device_class: temperature
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float max_t = -99.0f;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_max_cell_temp).state)) { if (id(pack1_max_cell_temp).state > max_t) max_t = id(pack1_max_cell_temp).state; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_max_cell_temp).state)) { if (id(pack2_max_cell_temp).state > max_t) max_t = id(pack2_max_cell_temp).state; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_max_cell_temp).state)) { if (id(pack3_max_cell_temp).state > max_t) max_t = id(pack3_max_cell_temp).state; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_max_cell_temp).state)) { if (id(pack4_max_cell_temp).state > max_t) max_t = id(pack4_max_cell_temp).state; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_max_cell_temp).state)) { if (id(pack5_max_cell_temp).state > max_t) max_t = id(pack5_max_cell_temp).state; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_max_cell_temp).state)) { if (id(pack6_max_cell_temp).state > max_t) max_t = id(pack6_max_cell_temp).state; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_max_cell_temp).state)) { if (id(pack7_max_cell_temp).state > max_t) max_t = id(pack7_max_cell_temp).state; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_max_cell_temp).state)) { if (id(pack8_max_cell_temp).state > max_t) max_t = id(pack8_max_cell_temp).state; }
+      return (max_t > -90.0f) ? max_t : 25.0f;
+
+  - platform: template
+    name: "Min Battery Cell Temperature"
+    id: min_battery_cell_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 0
+    device_class: temperature
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      float min_t = 99.0f;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000) && !isnan(id(pack1_min_cell_temp).state)) { if (id(pack1_min_cell_temp).state < min_t) min_t = id(pack1_min_cell_temp).state; }
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000) && !isnan(id(pack2_min_cell_temp).state)) { if (id(pack2_min_cell_temp).state < min_t) min_t = id(pack2_min_cell_temp).state; }
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000) && !isnan(id(pack3_min_cell_temp).state)) { if (id(pack3_min_cell_temp).state < min_t) min_t = id(pack3_min_cell_temp).state; }
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000) && !isnan(id(pack4_min_cell_temp).state)) { if (id(pack4_min_cell_temp).state < min_t) min_t = id(pack4_min_cell_temp).state; }
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000) && !isnan(id(pack5_min_cell_temp).state)) { if (id(pack5_min_cell_temp).state < min_t) min_t = id(pack5_min_cell_temp).state; }
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000) && !isnan(id(pack6_min_cell_temp).state)) { if (id(pack6_min_cell_temp).state < min_t) min_t = id(pack6_min_cell_temp).state; }
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000) && !isnan(id(pack7_min_cell_temp).state)) { if (id(pack7_min_cell_temp).state < min_t) min_t = id(pack7_min_cell_temp).state; }
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000) && !isnan(id(pack8_min_cell_temp).state)) { if (id(pack8_min_cell_temp).state < min_t) min_t = id(pack8_min_cell_temp).state; }
+      return (min_t < 90.0f) ? min_t : 25.0f;
+
+  - platform: template
+    name: "Active Battery Packs Count"
+    id: active_battery_packs_count
+    accuracy_decimals: 0
+    state_class: measurement
+    icon: "mdi:counter"
+    update_interval: 2s
+    lambda: |-
+      int count = 0;
+      if (id(pack1_monitor).state && is_pack_fresh(0, 90000)) count++;
+      if (id(pack2_monitor).state && is_pack_fresh(1, 90000)) count++;
+      if (id(pack3_monitor).state && is_pack_fresh(2, 90000)) count++;
+      if (id(pack4_monitor).state && is_pack_fresh(3, 90000)) count++;
+      if (id(pack5_monitor).state && is_pack_fresh(4, 90000)) count++;
+      if (id(pack6_monitor).state && is_pack_fresh(5, 90000)) count++;
+      if (id(pack7_monitor).state && is_pack_fresh(6, 90000)) count++;
+      if (id(pack8_monitor).state && is_pack_fresh(7, 30000)) count++;
+      return count;
+
+  - platform: template
+    name: "Inverter RS485 Query Count"
+    id: inverter_query_count
+    accuracy_decimals: 0
+    state_class: total_increasing
+    icon: "mdi:swap-horizontal"
+    update_interval: never
+
+
+
+# ------------------------------------------------------------------------------
+# Text Sensors — Battery Model Information
+# ------------------------------------------------------------------------------
+text_sensor:
+  - platform: template
+    name: "Pack 1 ESN (BarCode)"
+    id: pack1_esn_barcode
+    icon: "mdi:barcode"
+    update_interval: never
+
+  - platform: template
+    name: "Pack 2 ESN (BarCode)"
+    id: pack2_esn_barcode
+    icon: "mdi:barcode"
+    update_interval: never
+
+  - platform: template
+    name: "Pack 3 ESN (BarCode)"
+    id: pack3_esn_barcode
+    icon: "mdi:barcode"
+    update_interval: never
+
+  - platform: template
+    name: "Pack 4 ESN (BarCode)"
+    id: pack4_esn_barcode
+    icon: "mdi:barcode"
+    update_interval: never
+
+  - platform: template
+    name: "Pack 1 Battery Model Name"
+    id: pack1_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 2 Battery Model Name"
+    id: pack2_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 3 Battery Model Name"
+    id: pack3_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 4 Battery Model Name"
+    id: pack4_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 5 Battery Model Name"
+    id: pack5_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 6 Battery Model Name"
+    id: pack6_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 7 Battery Model Name"
+    id: pack7_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'
+
+  - platform: template
+    name: "Pack 8 Battery Model Name"
+    id: pack8_battery_model_name
+    lambda: 'return std::string("ESM-48100B1");'

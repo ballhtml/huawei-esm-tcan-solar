@@ -1,0 +1,1318 @@
+views:
+- path: default_view
+  title: Home Energy
+  icon: mdi:solar-power
+  type: masonry
+  badges: []
+  cards:
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-chips-card
+      alignment: center
+      chips:
+      - type: template
+        icon: mdi:solar-power
+        icon_color: green
+        content: ⚡ ภาพรวมระบบ
+        tap_action:
+          action: navigate
+          navigation_path: /home-energy
+      - type: template
+        icon: mdi:battery-heart-variant
+        icon_color: blue
+        content: 🔬 120 เซลล์
+        tap_action:
+          action: navigate
+          navigation_path: /home-energy/cell-diagnostics
+      - type: template
+        icon: mdi:tune-vertical
+        icon_color: purple
+        content: ⚙️ ตั้งค่าอินเวอร์เตอร์
+        tap_action:
+          action: navigate
+          navigation_path: /home-energy/inverter-setup
+      - type: template
+        icon: mdi:battery-check
+        icon_color: '{{ ''green'' if states(''sensor.battery_system_active_packs_count'')
+          | int(0) == 8 else ''amber'' }}'
+        content: ออนไลน์ {{ states('sensor.battery_system_active_packs_count') }}/8
+          แพ็ก (ΔV {{ states('sensor.battery_system_voltage_delta') }}V)
+      - type: template
+        icon: mdi:battery-charging-high
+        icon_color: blue
+        content: พร้อมจ่าย {{ states('sensor.battery_usable_energy_to_30_percent_kwh')
+          }} kWh
+      - type: template
+        icon: mdi:battery-clock
+        icon_color: cyan
+        content: ⏳ พอใช้ {{ states('sensor.battery_hours_remaining') }} ชม. (ถึง {{
+          states('sensor.battery_depletion_projected_time') }})
+      - type: template
+        icon: mdi:weather-sunny
+        icon_color: amber
+        content: ☀️ พรุ่งนี้ {{ states('sensor.energy_production_tomorrow') | round(1)
+          }} kWh
+    - type: custom:solar-bar-card
+      title: HomeBall Energy Center
+      inverter_size: 7.5
+      battery_capacity: 38.4
+      color_palette: classic-solar
+      power_unit: kW
+      decimal_places: 2
+      battery_soc_decimal_places: 1
+      segment_text_solar_home: ☀️➔🏠 {value}
+      segment_text_battery_charge: ☀️➔🔋 {value}
+      segment_text_export: ☀️➔⚡ {value}
+      show_header: true
+      show_weather: true
+      weather_entity: weather.forecast_home
+      header_sensor_1:
+        entity: sensor.battery_usable_energy_to_30_percent_kwh
+        name: พร้อมจ่าย (หัก 30% สำรอง)
+        icon: mdi:battery-charging-high
+      header_sensor_2:
+        entity: sensor.solar_energy_cost_saved_today
+        name: ประหยัดวันนี้
+        icon: mdi:cash-multiple
+      production_entity: sensor.home_energy_em11000_solar_total_power
+      production_history_entity: sensor.home_energy_em11000_energy_today
+      self_consumption_entity: sensor.home_energy_em11000_output_power
+      grid_power_entity: sensor.home_energy_em11000_grid_power
+      invert_grid_power: true
+      battery_power_entity: sensor.huawei_esm_battery_system_total_battery_system_power
+      battery_soc_entity: sensor.huawei_esm_battery_system_total_battery_system_soc
+      invert_battery_power: false
+      show_battery_indicator: true
+      show_battery_flow: true
+      battery_flow_animation_speed: 1.5
+      show_stats: true
+      show_stats_detail: true
+      stats_detail_position: below
+      stats_border_radius: 10
+      show_legend: true
+      show_legend_values: true
+      show_bar_label: true
+      show_bar_values: true
+      show_house_icon: true
+      show_grid_icon_always: true
+      show_energy_flow: true
+      energy_flow_speed: 1.8
+      energy_flow_threshold: 0.05
+      energy_flow_origin: bar_center
+      disable_animation: false
+      use_solcast: false
+      custom_labels:
+        solar: โซลาร์เซลล์
+        usage: ใช้ไฟในบ้าน
+        battery: แบตเตอรี่
+        export: ขายไฟ
+        import: ไฟหลวง (PEA)
+        grid_idle: สแตนด์บาย
+        grid_import: ใช้ไฟหลวง
+        grid_export: ขายไฟ
+    - type: custom:sunsynk-power-flow-card
+      cardstyle: full
+      wide: false
+      large_font: true
+      show_solar: true
+      show_battery: true
+      show_grid: true
+      center_no_grid: false
+      card_height: 100%
+      card_width: 100%
+      decimal_places: 2
+      decimal_places_energy: 1
+      dynamic_line_width: true
+      max_line_width: 5
+      min_line_width: 2
+      inverter:
+        modern: true
+        colour: '#1e88e5'
+        autarky: energy
+        model: deye
+        auto_scale: true
+        three_phase: false
+        navigate: ''
+        label_autarky: ''
+        label_ratio: ''
+      battery:
+        show_daily: true
+        count: 1
+        max_power: 11000
+        soc_end_of_charge: 100
+        soc_decimal_places: 1
+        energy: 38400
+        shutdown_soc: 30
+        shutdown_soc_offgrid: 20
+        auto_scale: true
+        show_absolute: true
+        invert_power: true
+        dynamic_colour: false
+        linear_gradient: true
+        hide_soc: false
+        animate: true
+        show_remaining_energy: true
+        remaining_energy_to_shutdown: true
+        invert_flow: false
+        animation_speed: 1.5
+      solar:
+        show_daily: true
+        mppts: 2
+        auto_scale: true
+        dynamic_colour: false
+        animation_speed: 1.5
+        max_power: 7500
+        pv1_max_power: 4000
+        pv2_max_power: 3500
+        pv1_name: String 1
+        pv2_name: String 2
+        invert_flow: false
+      load:
+        show_daily: true
+        dynamic_icon: true
+        dynamic_colour: false
+        animation_speed: 1.5
+        essential_name: House Load
+      grid:
+        show_daily_buy: true
+        show_daily_sell: false
+        show_nonessential: false
+        auto_scale: true
+        dynamic_colour: false
+        invert_flow: false
+      entities:
+        inverter_status_59: binary_sensor.home_energy_em11000_status
+        grid_connected_status_194: binary_sensor.home_energy_em11000_grid_connected
+        inverter_voltage_154: sensor.home_energy_em11000_output_voltage
+        inverter_current_164: sensor.home_energy_em11000_output_current
+        inverter_power_175: sensor.home_energy_em11000_output_power
+        dc_transformer_temp_90: sensor.home_energy_em11000_inverter_temperature
+        radiator_temp_91: sensor.home_energy_em11000_dc_module_temperature
+        environment_temp: sensor.home_energy_em11000_pv_temperature
+        load_frequency_192: sensor.home_energy_em11000_output_frequency
+        essential_power: sensor.home_energy_em11000_output_power
+        solar_power_185: sensor.home_energy_em11000_solar_total_power
+        pv1_power_186: sensor.home_energy_em11000_pv1_power
+        pv1_voltage_109: sensor.home_energy_em11000_pv1_voltage
+        pv1_current_110: sensor.home_energy_em11000_pv1_current
+        pv2_power_187: sensor.home_energy_em11000_pv2_power
+        pv2_voltage_111: sensor.home_energy_em11000_pv2_voltage
+        pv2_current_112: sensor.home_energy_em11000_pv2_current
+        day_pv_energy_108: sensor.home_energy_em11000_energy_today
+        total_pv_generation: sensor.home_energy_em11000_energy_total
+        grid_power_169: sensor.home_energy_em11000_grid_power
+        grid_ct_power_172: sensor.home_energy_em11000_grid_power
+        grid_voltage: sensor.home_energy_em11000_grid_voltage
+        battery_soc_184: sensor.huawei_esm_battery_system_total_battery_system_soc
+        battery_power_190: sensor.huawei_esm_battery_system_total_battery_system_power
+        battery_current_191: sensor.huawei_esm_battery_system_total_battery_system_current
+        battery_voltage_183: sensor.huawei_esm_battery_system_total_battery_system_voltage
+        battery_temp_182: sensor.huawei_esm_battery_system_max_battery_cell_temperature
+        battery_rated_capacity: sensor.huawei_esm_battery_system_total_battery_system_nominal_capacity
+        battery_current_direction: sensor.home_energy_em11000_battery_current_direction
+        battery_soh: sensor.huawei_esm_battery_system_total_battery_system_soh
+        day_battery_charge_70: sensor.home_energy_em11000_day_battery_charge
+        day_battery_discharge_71: sensor.home_energy_em11000_day_battery_discharge
+        day_load_energy_84: sensor.house_energy_daily
+        day_grid_import_76: sensor.grid_energy_daily
+    - type: custom:mushroom-template-card
+      primary: '🔋 การจ่ายไฟข้ามคืน: {{ states(''sensor.battery_overnight_endurance_status'')
+        }}'
+      secondary: '⚡ พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'')
+        }} kWh (~{{ states(''sensor.battery_hours_remaining'') }} ชม.) | ☀️ แดดพรุ่งนี้:
+        {{ states(''sensor.energy_production_tomorrow'') }} kWh (พีคเที่ยงตรง)'
+      icon: mdi:shield-sun
+      icon_color: green
+    - type: custom:mushroom-title-card
+      title: Solar Financial ROI & Energy Ledger
+      subtitle: สรุปสถิติการประหยัดไฟจริงและการใช้พลังงาน รายวันและรอบบิล (ตัดรอบวันที่
+        20)
+    - type: markdown
+      content: "## \U0001F4B0 บัญชีสรุปค่าไฟและเงินที่ประหยัดได้\nอัตราค่าไฟอ้างอิง:\
+        \ **4.50 บาท/หน่วย** | ตัดรอบบิลทุกวันที่ **20** ของเดือน\n\n<div style=\"\
+        margin: 8px 0 12px 0; padding: 12px 16px; background: rgba(33, 150, 243, 0.08);\
+        \ border-left: 4px solid #2196f3; border-radius: 6px; font-size: 13.5px; line-height:\
+        \ 1.6;\">\n  {% set grid_today = states('sensor.grid_energy_daily') | float(0)\
+        \ %}\n  {% set grid_cost_today = states('sensor.grid_cost_today') | float(0)\
+        \ %}\n  {% set saved_today = states('sensor.net_solar_savings_today') | float(0)\
+        \ %}\n  {% set house_cost_today = states('sensor.house_cost_today') | float(0)\
+        \ %}\n  {% set grid_cycle = states('sensor.grid_energy_billing_cycle') | float(0)\
+        \ %}\n  {% set grid_cost_normal = states('sensor.grid_cost_billing_cycle')\
+        \ | float(0) %}\n  {% set grid_cost_pea = states('sensor.grid_cost_billing_cycle_pea_net')\
+        \ | float(0) %}\n  \n  <b>⚡ สรุปวันนี้:</b> ดึงไฟหลวงมาใช้ <b>{{ '%.2f'|format(grid_today)\
+        \ }} หน่วย</b> (จ่ายการไฟฟ้า <b>฿{{ '%.2f'|format(grid_cost_today) }}</b>)\
+        \ | โซลาร์+แบตช่วยประหยัดไป <b>฿{{ '%.2f'|format(saved_today) }}</b> (มูลค่าไฟบ้านทั้งหมด\
+        \ ฿{{ '%.2f'|format(house_cost_today) }})<br>\n  <b>\U0001F9FE สรุปยอดเตรียมจ่ายบิล\
+        \ PEA รอบนี้ (20 ต.ค. - วันนี้):</b> ดึงไฟหลวงสะสม <b>{{ '%.2f'|format(grid_cycle)\
+        \ }} หน่วย</b> (เรทปกติ ฿{{ '%.2f'|format(grid_cost_normal) }})<br>\n  \U0001F449\
+        \ <span style=\"color: #4caf50; font-weight: bold;\">\U0001F381 หักสิทธิส่วนลด\
+        \ 50 หน่วยแรกแล้ว เหลือยอดเรียกเก็บจริงบิล PEA เพียง ฿{{ '%.2f'|format(grid_cost_pea)\
+        \ }}</span>\n</div>\n\n<center>\n<table style=\"width: 100%; border-collapse:\
+        \ collapse; text-align: center; font-size: 13.5px;\">\n  <thead>\n    <tr\
+        \ style=\"background: rgba(255,255,255,0.05); color: var(--secondary-text-color,\
+        \ #9e9e9e);\">\n      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px;\">ช่วงเวลา</th>\n      <th style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; color: #f44336;\">⚡ ไฟหลวง PEA<br><small\
+        \ style=\"font-weight: normal; font-size: 11px;\">(ที่ต้องจ่ายบิล)</small></th>\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px; color: #4caf50;\">\U0001F4B0 โซลาร์+แบต<br><small style=\"\
+        font-weight: normal; font-size: 11px;\">(ช่วยประหยัดเงิน)</small></th>\n \
+        \     <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px; color: #2196f3;\">\U0001F3E0 บ้านใช้ไฟทั้งหมด</th>\n \
+        \     <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px; color: #ff9800;\">☀️ โซลาร์ผลิตรวม</th>\n    </tr>\n \
+        \ </thead>\n  <tbody>\n    <tr>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold;\">วันนี้</td>\n\
+        \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px;\">{{ states('sensor.grid_energy_daily') }} หน่วย<br><span\
+        \ style=\"color: #ef5350; font-weight: bold;\">จ่าย ฿{{ '%.2f'|format(states('sensor.grid_cost_today')|float(0))\
+        \ }}</span></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold; color: #4caf50;\"\
+        >{{ states('sensor.solar_load_offset_today_kwh') }} หน่วย<br><span style=\"\
+        color: #4caf50; font-weight: bold; font-size: 13.5px;\">ประหยัด ฿{{ '%.2f'|format(states('sensor.net_solar_savings_today')|float(0))\
+        \ }}</span></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px;\">{{ states('sensor.house_energy_daily')\
+        \ }} หน่วย<br><small style=\"color: #90caf9;\">มูลค่า ฿{{ '%.2f'|format(states('sensor.house_cost_today')|float(0))\
+        \ }}</small></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px;\">{{ states('sensor.home_energy_em11000_energy_today')\
+        \ }} หน่วย<br><small style=\"color: #64b5f6;\">(เก็บเข้าแบต {{ states('sensor.home_energy_em11000_day_battery_charge')\
+        \ }} หน่วย)</small></td>\n    </tr>\n    <tr>\n      <td style=\"border: 1px\
+        \ solid var(--divider-color, rgba(127,127,127,0.18)); padding: 8px 6px; font-weight:\
+        \ bold;\">เมื่อวาน</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px;\">{{ state_attr('sensor.grid_energy_daily',\
+        \ 'last_period') or '-' }} หน่วย<br><span style=\"color: #ef5350; font-weight:\
+        \ bold;\">จ่าย ฿{{ '%.2f'|format(states('sensor.grid_cost_yesterday')|float(0))\
+        \ }}</span></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold; color: #4caf50;\"\
+        >{{ states('sensor.solar_load_offset_yesterday_kwh') }} หน่วย<br><span style=\"\
+        color: #4caf50; font-weight: bold; font-size: 13.5px;\">ประหยัด ฿{{ '%.2f'|format(states('sensor.net_solar_savings_yesterday')|float(0))\
+        \ }}</span></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px;\">{{ state_attr('sensor.house_energy_daily',\
+        \ 'last_period') or '-' }} หน่วย<br><small style=\"color: #90caf9;\">มูลค่า\
+        \ ฿{{ '%.2f'|format(states('sensor.house_cost_yesterday')|float(0)) }}</small></td>\n\
+        \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px;\">{{ state_attr('sensor.solar_energy_daily', 'last_period')\
+        \ or '-' }} หน่วย</td>\n    </tr>\n    <tr style=\"background: rgba(255,255,255,0.03);\"\
+        >\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px; font-weight: bold;\">รอบบิลนี้สะสม<br><small style=\"\
+        font-weight: normal; color: var(--secondary-text-color);\">(20 ต.ค. - วันนี้)</small></td>\n\
+        \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 6px; font-weight: bold;\">{{ states('sensor.grid_energy_billing_cycle')\
+        \ }} หน่วย<br><span style=\"color: #ef5350; font-weight: bold; font-size:\
+        \ 14px;\">บิล PEA ฿{{ '%.2f'|format(states('sensor.grid_cost_billing_cycle_pea_net')|float(0))\
+        \ }}</span><br><small style=\"color: #4caf50; font-size: 11px;\">(เรทปกติ\
+        \ ฿{{ '%.2f'|format(states('sensor.grid_cost_billing_cycle')|float(0)) }}\
+        \ หักส่วนลด 50 หน่วย)</small></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold; font-size:\
+        \ 14px; color: #4caf50;\">{{ states('sensor.solar_load_offset_billing_cycle_kwh')\
+        \ }} หน่วย<br><span style=\"color: #4caf50; font-weight: bold; font-size:\
+        \ 14px;\">ประหยัด ฿{{ '%.2f'|format(states('sensor.net_solar_savings_billing_cycle')|float(0))\
+        \ }}</span></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold;\">{{ states('sensor.house_energy_billing_cycle')\
+        \ }} หน่วย<br><small style=\"color: #90caf9;\">มูลค่า ฿{{ '%.2f'|format(states('sensor.house_cost_billing_cycle')|float(0))\
+        \ }}</small></td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 8px 6px; font-weight: bold;\">{{ states('sensor.solar_energy_billing_cycle')\
+        \ }} หน่วย</td>\n    </tr>\n  </tbody>\n</table>\n</center>\n\n<div style=\"\
+        margin-top: 8px; font-size: 12px; color: var(--secondary-text-color); line-height:\
+        \ 1.5;\">\n• <b>ยอดประหยัดจริง:</b> คำนวณเฉพาะไฟที่โซลาร์และแบตเตอรี่จ่ายทดแทนไฟหลวงเข้าบ้านจริง\
+        \ (เรท 4.50 บ./หน่วย)<br>\n• <b>ไฟหลวงรอบบิลนี้:</b> คำนวณตามสูตรสิทธิ์ลดหย่อน\
+        \ PEA ขั้นบันไดสุทธิ ซึ่งตรงกับบิลเรียกเก็บจริงที่จะส่งมาที่บ้าน<br>\n• <b>รอบบิลก่อนหน้า\
+        \ (ก่อนติดตั้งระบบเต็ม):</b> ใช้ไฟหลวง 351 หน่วย (จ่ายบิลจริง ฿1,233.81)\n\
+        </div>"
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: Huawei ESM Battery Bank
+      subtitle: 8 Packs Cluster (48V 800Ah / 38.4 kWh)
+    - type: custom:mushroom-template-card
+      primary: '{% set pwr = states(''sensor.huawei_esm_battery_system_total_battery_system_power'')|float(0)
+        %}{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+        %}{% if cur < -2.0 %}🔋 แบตเตอรีกำลังจ่ายไฟเข้าบ้าน (Discharging){% elif cur
+        > 2.0 %}⚡ แบตเตอรีกำลังชาร์จไฟจากโซลาร์ (Charging){% else %}💤 แบตเตอรี่สแตนด์บาย
+        (พร้อมใช้งาน){% endif %}'
+      secondary: '{% set pwr = states(''sensor.huawei_esm_battery_system_total_battery_system_power'')|float(0)
+        %}{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+        %}{% set soc = states(''sensor.huawei_esm_battery_system_total_battery_system_soc'')|float(0)
+        %}{% set usable = states(''sensor.battery_usable_energy_to_30_percent_kwh'')|float(0)
+        %}{% if cur < -2.0 %}จ่ายออก {{ ''%.1f''|format(pwr|abs / 1000) }} kW ({{
+        ''%.1f''|format(cur|abs) }} A) | แบตเตอรี่คงเหลือ {{ ''%.0f''|format(soc)
+        }}% (พร้อมจ่ายอีก {{ ''%.1f''|format(usable) }} kWh){% elif cur > 2.0 %}รับชาร์จ
+        {{ ''%.1f''|format(pwr / 1000) }} kW ({{ ''%.1f''|format(cur) }} A) | กำลังเก็บสะสมความจุ
+        {{ ''%.0f''|format(soc) }}%{% else %}พร้อมใช้งานทันที | ความจุคงเหลือ {{ ''%.0f''|format(soc)
+        }}% (พร้อมจ่าย {{ ''%.1f''|format(usable) }} kWh){% endif %}'
+      icon: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+        %}{% if cur < -2.0 %}mdi:battery-arrow-down{% elif cur > 2.0 %}mdi:battery-charging-high{%
+        else %}mdi:battery-check{% endif %}'
+      icon_color: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+        %}{% if cur < -2.0 %}green{% elif cur > 2.0 %}amber{% else %}blue{% endif
+        %}'
+      fill_container: true
+      layout: horizontal
+      multiline_secondary: true
+      card_mod:
+        style: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+          %}ha-card { background: {{ ''rgba(16, 185, 129, 0.10)'' if cur < -2.0 else
+          (''rgba(245, 158, 11, 0.10)'' if cur > 2.0 else ''rgba(59, 130, 246, 0.08)'')
+          }}; border: 1px solid {{ ''rgba(16, 185, 129, 0.35)'' if cur < -2.0 else
+          (''rgba(245, 158, 11, 0.35)'' if cur > 2.0 else ''rgba(59, 130, 246, 0.25)'')
+          }}; border-radius: 12px; margin-bottom: 6px; }'
+    - type: custom:mushroom-title-card
+      title: Battery Packs Real-Time Load Sharing
+      subtitle: การจัดอันดับและประวัติการแบ่งกระแสไฟเรียลไทม์
+    - type: markdown
+      content: "{% set packs = [\n  {'num': 1, 'v': states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_1_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_1_state_of_charge')},\n\
+        \  {'num': 2, 'v': states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_2_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_2_state_of_charge')},\n\
+        \  {'num': 3, 'v': states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_3_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_3_state_of_charge')},\n\
+        \  {'num': 4, 'v': states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_4_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_4_state_of_charge')},\n\
+        \  {'num': 5, 'v': states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_5_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_5_state_of_charge')},\n\
+        \  {'num': 6, 'v': states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_6_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_6_state_of_charge')},\n\
+        \  {'num': 7, 'v': states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_7_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_7_state_of_charge')},\n\
+        \  {'num': 8, 'v': states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0),\
+        \ 'i': states('sensor.huawei_esm_battery_system_pack_8_current')|float(0),\
+        \ 'soc': states('sensor.huawei_esm_battery_system_pack_8_state_of_charge')}\n\
+        ] %}\n{%- set active = packs | rejectattr('soc', 'in', ['unknown', 'unavailable'])\
+        \ | selectattr('v', 'gt', 20.0) | list %} {%- set total_i = active | map(attribute='i')\
+        \ | sum %}\n{%- set is_charging = total_i >= 0 %}\n{%- set sorted_packs =\
+        \ active | sort(attribute='i', reverse=is_charging) %} {%- set top_pack =\
+        \ sorted_packs[0] if sorted_packs | length > 0 else none %}\n{% if top_pack\
+        \ and top_pack.i < -1.0 %} > ⚡ **จ่ายไฟหนักสุด:** **Pack {{ top_pack.num }}**\
+        \ ({{ '%+.2f' | format(top_pack.i) }} A / {{ '%+.0f' | format(top_pack.v *\
+        \ top_pack.i) }} W) {% elif top_pack and top_pack.i > 1.0 %} > \U0001F50B\
+        \ **รับชาร์จไฟสูงสุด:** **Pack {{ top_pack.num }}** ({{ '%+.2f' | format(top_pack.i)\
+        \ }} A / {{ '%+.0f' | format(top_pack.v * top_pack.i) }} W) {% else %} > \U0001F4A4\
+        \ **สถานะรวม:** สแตนด์บาย / กระแสนิ่งสมดุล {% endif %}\n<center> <table style=\"\
+        margin: 0 auto !important; border-collapse: collapse; text-align: center;\
+        \ font-size: 14px; white-space: nowrap;\">\n  <thead>\n    <tr style=\"background:\
+        \ rgba(255,255,255,0.03); color: var(--secondary-text-color, #9e9e9e);\">\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">#</th>\n    \
+        \  <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 14px; font-weight: 600; text-align: center;\">สถานะ</th>\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 12px; font-weight: 600; text-align: center;\">กระแส&nbsp;(A)</th>\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">กำลัง&nbsp;(W)</th>\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">แรงดัน&nbsp;(V)</th>\n\
+        \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 8px 10px; font-weight: 600; text-align: center;\">SOC</th>\n  \
+        \  </tr>\n  </thead>\n  <tbody>\n    {% for p in sorted_packs -%}\n    {%\
+        \ set icon = '\U0001F947&nbsp;' ~ p.num if loop.index == 1 else ('\U0001F948\
+        &nbsp;' ~ p.num if loop.index == 2 else ('\U0001F949&nbsp;' ~ p.num if loop.index\
+        \ == 3 else p.num)) -%}\n    {% set status = '\U0001F534&nbsp;จ่ายไฟหลัก'\
+        \ if p.i < -8.0 else ('\U0001F7E0&nbsp;จ่ายไฟ' if p.i < -2.0 else ('\U0001F7E1\
+        &nbsp;จ่ายไฟเบา' if p.i < -0.5 else ('\U0001F7E2&nbsp;ชาร์จไฟหลัก' if p.i\
+        \ > 8.0 else ('\U0001F7E2&nbsp;ชาร์จไฟ' if p.i > 1.0 else '⚪&nbsp;สแตนด์บาย'))))\
+        \ -%}\n    <tr>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 9px 10px; font-weight: bold; text-align:\
+        \ center;\">{{ icon }}</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 9px 14px; text-align: center;\">{{ status\
+        \ }}</td>\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 9px 12px; font-weight: bold; text-align: center;\">{{ '%+.2f' |\
+        \ format(p.i) }} A</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ '%+.0f'\
+        \ | format(p.v * p.i) }} W</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ '%.1f'\
+        \ | format(p.v) }} V</td>\n      <td style=\"border: 1px solid var(--divider-color,\
+        \ rgba(127,127,127,0.18)); padding: 9px 10px; text-align: center;\">{{ p.soc\
+        \ }}%</td>\n    </tr>\n    {% endfor %}\n  </tbody>\n</table> </center>"
+    - type: grid
+      columns: 4
+      square: false
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ ''%.0f''|format(states(''sensor.huawei_esm_battery_system_total_battery_system_soc'')|float(0))
+          }}%'
+        secondary: ระดับความจุ
+        icon: mdi:battery-high
+        icon_color: green
+        layout: vertical
+      - type: custom:mushroom-template-card
+        primary: '{{ ''%.1f''|format(states(''sensor.huawei_esm_battery_system_total_battery_system_voltage'')|float(0))
+          }} V'
+        secondary: แรงดันบัสบาร์
+        icon: mdi:sine-wave
+        icon_color: blue
+        layout: vertical
+      - type: custom:mushroom-template-card
+        primary: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+          %}{{ ''%.1f''|format(cur|abs) }} A'
+        secondary: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+          %}{{ ''จ่ายออก'' if cur < -2.0 else (''ชาร์จเข้า'' if cur > 2.0 else ''สแตนด์บาย'')
+          }}'
+        icon: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+          %}{{ ''mdi:battery-arrow-down'' if cur < -2.0 else (''mdi:battery-arrow-up''
+          if cur > 2.0 else ''mdi:power-plug-outline'') }}'
+        icon_color: '{% set cur = states(''sensor.huawei_esm_battery_system_total_battery_system_current'')|float(0)
+          %}{{ ''green'' if cur < -2.0 else (''amber'' if cur > 2.0 else ''grey'')
+          }}'
+        layout: vertical
+      - type: custom:mushroom-template-card
+        primary: '{% set pwr = states(''sensor.huawei_esm_battery_system_total_battery_system_power'')|float(0)
+          %}{{ ''%.2f''|format(pwr|abs / 1000) }} kW'
+        secondary: '{% set pwr = states(''sensor.huawei_esm_battery_system_total_battery_system_power'')|float(0)
+          %}{{ ''กำลังจ่ายไฟ'' if pwr < -50 else (''กำลังชาร์จ'' if pwr > 50 else
+          ''สแตนด์บาย'') }}'
+        icon: mdi:flash
+        icon_color: '{% set pwr = states(''sensor.huawei_esm_battery_system_total_battery_system_power'')|float(0)
+          %}{{ ''green'' if pwr < -50 else (''amber'' if pwr > 50 else ''grey'') }}'
+        layout: vertical
+    - type: grid
+      columns: 2
+      square: false
+      cards:
+      - type: custom:mushroom-template-card
+        entity: sensor.huawei_esm_battery_system_total_battery_system_remaining_capacity
+        primary: พลังงานคงเหลือ
+        secondary: '{{ states(''sensor.huawei_esm_battery_system_total_battery_system_remaining_capacity'')
+          }} Ah (~{{ ((states(''sensor.huawei_esm_battery_system_total_battery_system_soc'')|float(0)
+          * 38.4) / 100)|round(1) }} kWh)'
+        icon: mdi:battery-charging-high
+        icon_color: green
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_em11000_day_battery_discharge
+        primary: พลังงานใช้ไปวันนี้
+        secondary: จ่าย {{ states('sensor.home_energy_em11000_day_battery_discharge')
+          }} kWh | ชาร์จ {{ states('sensor.home_energy_em11000_day_battery_charge')
+          }} kWh
+        icon: mdi:battery-sync
+        icon_color: amber
+      - type: custom:mushroom-template-card
+        entity: sensor.huawei_esm_battery_system_total_battery_system_nominal_capacity
+        primary: ความจุติดตั้งรวม
+        secondary: 38.4 kWh (800 Ah / 8 Packs)
+        icon: mdi:server-network
+        icon_color: blue
+      - type: custom:mushroom-template-card
+        entity: sensor.huawei_esm_battery_system_total_battery_system_soc
+        primary: พลังงานพร้อมจ่าย (ถึง 20%)
+        secondary: '{% set soc = states(''sensor.huawei_esm_battery_system_total_battery_system_soc'')|float(0)
+          %} ~{{ (([soc - 20, 0] | max) * 0.384)|round(1) }} kWh ใช้งานได้'
+        icon: mdi:shield-battery
+        icon_color: teal
+    - type: custom:mushroom-title-card
+      title: Individual Packs SOC
+      subtitle: ระดับความจุแบตเตอรี่รายก้อน
+    - type: grid
+      columns: 2
+      square: false
+      cards:
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_1_state_of_charge
+        name: '#1'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_2_state_of_charge
+        name: '#2'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_3_state_of_charge
+        name: '#3'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_4_state_of_charge
+        name: '#4'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_5_state_of_charge
+        name: '#5'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_6_state_of_charge
+        name: '#6'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_7_state_of_charge
+        name: '#7'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+      - type: custom:entity-progress-card
+        entity: sensor.huawei_esm_battery_system_pack_8_state_of_charge
+        name: '#8'
+        size: small
+        max: 100
+        custom_theme:
+        - min: 0
+          max: 25
+          color: '#e74c3c'
+        - min: 25
+          max: 60
+          color: '#f39c12'
+        - min: 60
+          max: 100
+          color: '#2ecc71'
+    - type: grid
+      columns: 2
+      square: false
+      cards:
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_inverter_bridge_logger_inverter_queries_count
+        primary: Inverter Link (Li2)
+        secondary: '{% set q = states(''sensor.home_energy_inverter_bridge_logger_inverter_queries_count'')
+          %} {% if q not in [''unknown'', ''unavailable''] and q|int(0) > 0 %}Online
+          ({{ q|int(0) }} Q){% else %}Active (Online){% endif %}'
+        icon: mdi:swap-horizontal-bold
+        icon_color: green
+      - type: custom:mushroom-template-card
+        entity: sensor.huawei_esm_battery_system_total_battery_system_voltage
+        primary: เฉลี่ยต่อเซลล์ (15S)
+        secondary: '{{ (states(''sensor.huawei_esm_battery_system_total_battery_system_voltage'')|float(0)
+          / 15)|round(3) }} V/Cell'
+        icon: mdi:scale-balance
+        icon_color: blue
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_discharge_current_limit
+        primary: สถานะป้องกัน Li2 BMS
+        secondary: '{% set chg = states(''sensor.home_energy_inverter_bridge_logger_li2_charge_current_limit'')|float(-1)
+          %} {% set dis = states(''sensor.home_energy_inverter_bridge_logger_li2_discharge_current_limit'')|float(-1)
+          %} {% if chg < 0 or dis < 0 %}กำลังซิงค์ข้อมูล...{% elif dis == 0 %}🔴 ตัดจ่ายไฟ
+          (รอชาร์จ ≥60%/50V){% elif chg == 0 %}🟠 ตัดชาร์จ (แบตเต็ม/OVP){% elif dis
+          < 300 or chg < 120 %}🟡 ลดกระแส (Chg {{ ''%.0f''|format(chg) }}A | Dis {{
+          ''%.0f''|format(dis) }}A){% else %}🟢 ปกติ (Chg {{ ''%.0f''|format(chg) }}A
+          | Dis {{ ''%.0f''|format(dis) }}A){% endif %}'
+        icon: mdi:shield-check
+        icon_color: '{% set chg = states(''sensor.home_energy_inverter_bridge_logger_li2_charge_current_limit'')|float(-1)
+          %} {% set dis = states(''sensor.home_energy_inverter_bridge_logger_li2_discharge_current_limit'')|float(-1)
+          %} {% if dis == 0 %}red{% elif chg == 0 or (dis > 0 and dis < 300) or (chg
+          > 0 and chg < 120) %}amber{% else %}green{% endif %}'
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_min_pack_voltage
+        primary: แรงดันลูกต่ำสุด & เซลล์
+        secondary: '{% set mp = states(''sensor.home_energy_inverter_bridge_logger_li2_min_pack_voltage'')|float(0)
+          %} {% set cmin = states(''sensor.home_energy_inverter_bridge_logger_li2_min_cell_voltage'')|float(0)
+          %} {% set cmax = states(''sensor.home_energy_inverter_bridge_logger_li2_max_cell_voltage'')|float(0)
+          %} {% if mp > 0 %}{{ ''%.2f''|format(mp) }}V | {{ ''%.3f''|format(cmin)
+          }}–{{ ''%.3f''|format(cmax) }}V (Δ{{ ''%.0f''|format((cmax - cmin)*1000)
+          }}mV){% else %}รอข้อมูล CAN...{% endif %}'
+        icon: mdi:battery-heart-variant
+        icon_color: '{% set mp = states(''sensor.home_energy_inverter_bridge_logger_li2_min_pack_voltage'')|float(50)
+          %} {% set cmin = states(''sensor.home_energy_inverter_bridge_logger_li2_min_cell_voltage'')|float(3.3)
+          %} {% if mp < 47.2 or cmin < 3.05 %}red{% elif mp < 48.0 or cmin < 3.12
+          %}amber{% else %}teal{% endif %}'
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Current Sharing History (2 Hours)
+        show_states: true
+        colorize_states: true
+      graph_span: 2h
+      all_series_config:
+        stroke_width: 2
+        type: line
+      series:
+      - entity: sensor.huawei_esm_battery_system_pack_1_current
+        name: Pack 1
+        color: '#e74c3c'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_2_current
+        name: Pack 2
+        color: '#e67e22'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_3_current
+        name: Pack 3
+        color: '#f39c12'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_4_current
+        name: Pack 4
+        color: '#2ecc71'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_5_current
+        name: Pack 5
+        color: '#1abc9c'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_6_current
+        name: Pack 6
+        color: '#3498db'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_7_current
+        name: Pack 7
+        color: '#2980b9'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_pack_8_current
+        name: Pack 8
+        color: '#8e44ad'
+        stroke_width: 2
+        type: line
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: Inverter Power & Energy Balance
+      subtitle: กราฟสมดุลกำลังไฟฟ้า 24 ชั่วโมง และสถิติแนวโน้มรายสัปดาห์
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Power & Energy Balance (24 Hours)
+        show_states: true
+        colorize_states: true
+      graph_span: 24h
+      series:
+      - entity: sensor.home_energy_em11000_solar_total_power
+        name: Solar PV
+        color: '#f39c12'
+        stroke_width: 2
+        type: line
+      - entity: sensor.home_energy_em11000_output_power
+        name: House Load
+        color: '#3498db'
+        stroke_width: 2
+        type: line
+      - entity: sensor.huawei_esm_battery_system_total_battery_system_power
+        name: Battery Power
+        color: '#2ecc71'
+        stroke_width: 2
+        type: line
+      - entity: sensor.home_energy_em11000_grid_power
+        name: Grid
+        color: '#95a5a6'
+        stroke_width: 1.5
+        type: line
+    - type: custom:mushroom-title-card
+      title: Daily Solar & Energy Trends
+      subtitle: สถิติการประหยัดไฟ & การใช้พลังงานรายวัน (7 วันล่าสุด)
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: สถิติการประหยัดไฟ & การใช้พลังงานรายวัน (7 วันล่าสุด)
+        show_states: true
+        colorize_states: true
+      graph_span: 7d
+      span:
+        end: day
+      apex_config:
+        chart:
+          type: bar
+        plotOptions:
+          bar:
+            columnWidth: 65%
+            borderRadius: 4
+        legend:
+          show: true
+          position: bottom
+      series:
+      - entity: sensor.home_energy_em11000_energy_today
+        name: โซลาร์ผลิต (kWh)
+        color: '#2ecc71'
+        type: column
+        group_by:
+          func: max
+          duration: 1d
+      - entity: sensor.house_energy_daily
+        name: บ้านใช้ไฟ (kWh)
+        color: '#3498db'
+        type: column
+        group_by:
+          func: max
+          duration: 1d
+      - entity: sensor.grid_energy_daily
+        name: ไฟหลวง PEA (kWh)
+        color: '#e74c3c'
+        type: column
+        group_by:
+          func: max
+          duration: 1d
+      - entity: sensor.solar_load_offset_today_kwh
+        name: ประหยัดได้จริง (kWh)
+        color: '#f39c12'
+        type: column
+        group_by:
+          func: max
+          duration: 1d
+    - type: custom:mushroom-title-card
+      title: System Controls & Diagnostics
+      subtitle: การตั้งค่าโหมดอินเวอร์เตอร์ และลิงก์ดาวน์โหลด Log
+    - type: grid
+      columns: 2
+      square: false
+      cards:
+      - type: custom:mushroom-template-card
+        primary: 🔬 เจาะลึก 120 เซลล์
+        secondary: ดูแรงดัน Heatmap รายก้อน
+        icon: mdi:battery-heart-variant
+        icon_color: blue
+        layout: horizontal
+        fill_container: true
+        tap_action:
+          action: navigate
+          navigation_path: /home-energy/cell-diagnostics
+      - type: custom:mushroom-template-card
+        primary: ⚙️ ตั้งค่าอินเวอร์เตอร์
+        secondary: ปรับ Priority & Cut-off
+        icon: mdi:tune-vertical
+        icon_color: purple
+        layout: horizontal
+        fill_container: true
+        tap_action:
+          action: navigate
+          navigation_path: /home-energy/inverter-setup
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-select-card
+        entity: select.home_energy_em11000_main_output_priority
+        name: Output Priority
+        icon: mdi:power-cycle
+      - type: custom:mushroom-select-card
+        entity: select.home_energy_em11000_charger_source_priority
+        name: Charger Priority
+        icon: mdi:battery-charging
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: select.home_energy_em11000_battery_type
+        primary: Switch to USER
+        secondary: "{% if is_state('select.home_energy_em11000_battery_type', 'USER')\
+          \ %}\n  Active (โหมดกำหนดเอง)\n{% else %}\n  แตะเพื่อสลับเป็น USER\n{% endif\
+          \ %}"
+        icon: mdi:battery-clock
+        icon_color: "{% if is_state('select.home_energy_em11000_battery_type', 'USER')\
+          \ %}\n  orange\n{% else %}\n  grey\n{% endif %}"
+        tap_action:
+          action: call-service
+          service: select.select_option
+          target:
+            entity_id: select.home_energy_em11000_battery_type
+          data:
+            option: USER
+          confirmation:
+            text: ยืนยันการสลับโหมดแบตเตอรี่เป็น USER (โหมดกำหนดเอง) ไปยังอินเวอร์เตอร์?
+        hold_action:
+          action: more-info
+      - type: custom:mushroom-template-card
+        entity: select.home_energy_em11000_battery_type
+        primary: Switch to Li2
+        secondary: "{% if is_state('select.home_energy_em11000_battery_type', 'Li2')\
+          \ %}\n  Active (Pylontech CAN)\n{% else %}\n  แตะเพื่อสลับเป็น Li2\n{% endif\
+          \ %}"
+        icon: mdi:battery-sync
+        icon_color: "{% if is_state('select.home_energy_em11000_battery_type', 'Li2')\
+          \ %}\n  blue\n{% else %}\n  grey\n{% endif %}"
+        tap_action:
+          action: call-service
+          service: select.select_option
+          target:
+            entity_id: select.home_energy_em11000_battery_type
+          data:
+            option: Li2
+          confirmation:
+            text: ยืนยันการสลับโหมดแบตเตอรี่เป็น Li2 (Pylontech BMS) ไปยังอินเวอร์เตอร์?
+        hold_action:
+          action: more-info
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_apply_user_mode_profile
+        primary: Set 15S Profile
+        secondary: เขียนค่า 54V/53.2V ปลอดภัย
+        icon: mdi:tune-vertical
+        icon_color: green
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_apply_user_mode_profile
+          confirmation:
+            text: 'ยืนยันการตั้งค่า Profile โหมด USER (15S Huawei: Bulk 54.0V, Float
+              53.2V) ไปยังอินเวอร์เตอร์?'
+      - type: custom:mushroom-template-card
+        primary: MicroSD Log (.CSV)
+        secondary: แตะเปิดเว็บ 192.168.8.109:8080
+        icon: mdi:folder-download
+        icon_color: purple
+        tap_action:
+          action: url
+          url_path: http://192.168.8.109:8080/
+- title: Cell Diagnostics
+  path: cells
+  icon: mdi:battery-heart-variant
+  type: masonry
+  badges: []
+  cards:
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-template-card
+      primary: ⬅️ กลับสู่หน้าภาพรวมหลัก (Home Energy)
+      secondary: แตะเพื่อกลับไปยังหน้าภาพรวมพลังงานและบัญชีสรุปค่าไฟ
+      icon: mdi:arrow-left-bold-box
+      icon_color: blue
+      tap_action:
+        action: navigate
+        navigation_path: /home-energy
+    - type: custom:mushroom-title-card
+      title: 🔋 ระบบวิเคราะห์สุขภาพเซลล์แบตเตอรี่ (120-Cell Diagnostics)
+      subtitle: รายงานสถานะแรงดันเซลล์สดรายลูก พร้อมตรวจจับจุดดริฟต์ (Δ) เชิงรุก 8
+        แพ็ก
+    - type: markdown
+      content: "{% set p1 = 'sensor.huawei_esm_battery_system_pack_' %}\n{% set p2\
+        \ = 'sensor.tcanesm_pack_' %}\n\n### \U0001F4CA สรุปความสมดุลแบตเตอรี่ 8 แพ็ก\
+        \ (Huawei ESM-48100B1)\n\n| แพ็ก | แรงดันรวม | กระแส (A) | SOC | ต่ำสุด (Min)\
+        \ | สูงสุด (Max) | ดริฟต์ (Δ) | สถานะความสมดุล |\n|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|\n\
+        {%- for p in range(1, 9) %}\n{%- set v_ent = p1 ~ p ~ '_battery_voltage' %}\n\
+        {%- set v = states(v_ent)|float(-1) %}\n{%- if v < 0 %}{% set v_ent = p2 ~\
+        \ p ~ '_battery_voltage' %}{% set v = states(v_ent)|float(0) %}{% endif %}\n\
+        {%- set i_ent = p1 ~ p ~ '_current' %}\n{%- set i = states(i_ent)|float(0)\
+        \ %}\n{%- if i == 0 %}{% set i_ent = p2 ~ p ~ '_current' %}{% set i = states(i_ent)|float(0)\
+        \ %}{% endif %}\n{%- set soc_ent = p1 ~ p ~ '_state_of_charge' %}\n{%- set\
+        \ soc = states(soc_ent)|float(-1) %}\n{%- if soc < 0 %}{% set soc_ent = p2\
+        \ ~ p ~ '_state_of_charge' %}{% set soc = states(soc_ent)|float(0) %}{% endif\
+        \ %}\n{%- set ns = namespace(min_v=999.0, max_v=0.0, min_idx=0, max_idx=0,\
+        \ diff=0, cells=[]) %}\n{%- for c in range(1, 16) %}\n  {%- set c_str = '%02d'|format(c)\
+        \ %}\n  {%- set c_ent = p1 ~ p ~ '_cell_' ~ c_str ~ '_voltage' %}\n  {%- set\
+        \ cv = states(c_ent)|float(-1) %}\n  {%- if cv < 0 %}{% set c_ent = p2 ~ p\
+        \ ~ '_cell_' ~ c_str ~ '_voltage' %}{% set cv = states(c_ent)|float(0) %}{%\
+        \ endif %}\n  {%- if cv > 0 %}\n    {%- set ns.cells = ns.cells + [cv] %}\n\
+        \    {%- if cv < ns.min_v %}{% set ns.min_v = cv %}{% set ns.min_idx = c %}{%\
+        \ endif %}\n    {%- if cv > ns.max_v %}{% set ns.max_v = cv %}{% set ns.max_idx\
+        \ = c %}{% endif %}\n  {%- endif %}\n{%- endfor %}\n{%- if ns.cells|length\
+        \ > 0 %}\n  {%- set ns.diff = ((ns.max_v - ns.min_v) * 1000)|round(0)|int\
+        \ %}\n{%- endif %}\n{%- set badge = '\U0001F7E2 สมดุลดีเยี่ยม' %}\n{%- if\
+        \ ns.diff >= 30 %}{% set badge = '\U0001F7E1 เฝ้าระวัง' %}{% endif %}\n{%-\
+        \ if ns.diff >= 50 or ns.max_v >= 3.580 or (ns.min_v <= 3.000 and ns.min_v\
+        \ > 0) %}{% set badge = '\U0001F534 ผิดปกติ' %}{% endif %}\n| **Pack #{{ p\
+        \ }}** | {{ '%.2f'|format(v) }} V | {{ '+' if i >= 0 else '' }}{{ '%.1f'|format(i)\
+        \ }} A | {{ '%.0f'|format(soc) }}% | {{ '%.3f'|format(ns.min_v) }} V (C{{\
+        \ '%02d'|format(ns.min_idx) }}) | {{ '%.3f'|format(ns.max_v) }} V (C{{ '%02d'|format(ns.max_idx)\
+        \ }}) | **{{ ns.diff }} mV** | {{ badge }} |\n{%- endfor %}\n"
+    - type: markdown
+      content: "{% set p1 = 'sensor.huawei_esm_battery_system_pack_' %}\n{% set p2\
+        \ = 'sensor.tcanesm_pack_' %}\n{% set pack_names = {\n  1: 'Pack #1 [ลูกที่\
+        \ 1 / ID 214]',\n  2: 'Pack #2 [ลูกที่ 2 / ID 215]',\n  3: 'Pack #3 [ลูกที่\
+        \ 3 / ID 216]',\n  4: 'Pack #4 [ลูกที่ 4 / บัสแยก ID 214]',\n  5: 'Pack #5\
+        \ [ลูกที่ 5 / ID 218]',\n  6: 'Pack #6 [ลูกที่ 6 / ID 219]',\n  7: 'Pack #7\
+        \ [ลูกที่ 7 / ID 220]',\n  8: 'Pack #8 [ลูกที่ 8 / บอร์ดบริดจ์ CAN]'\n} %}\n\
+        \n### \U0001F52C รายงานวิเคราะห์ 15 เซลล์ แยกรายแพ็ก (15S &times; 8 Packs)\n\
+        {% for p in range(1, 9) -%}\n{% set v = states(p1 ~ p ~ '_battery_voltage')|float(states(p2\
+        \ ~ p ~ '_battery_voltage')|float(0)) -%}\n{% set i = states(p1 ~ p ~ '_current')|float(states(p2\
+        \ ~ p ~ '_current')|float(0)) -%}\n{% set soc = states(p1 ~ p ~ '_state_of_charge')|float(states(p2\
+        \ ~ p ~ '_state_of_charge')|float(0)) -%}\n{% set temp = states(p1 ~ p ~ '_max_cell_temperature')|float(states(p2\
+        \ ~ p ~ '_max_cell_temperature')|float(0)) -%}\n{% set ns = namespace(min_v=999.0,\
+        \ max_v=0.0, min_idx=0, max_idx=0, cells=[]) -%}\n{% for c in range(1, 16)\
+        \ -%}\n  {% set c_str = '%02d'|format(c) -%}\n  {% set cv = states(p1 ~ p\
+        \ ~ '_cell_' ~ c_str ~ '_voltage')|float(states(p2 ~ p ~ '_cell_' ~ c_str\
+        \ ~ '_voltage')|float(0)) -%}\n  {% set ns.cells = ns.cells + [cv] -%}\n \
+        \ {% if cv > 0 and cv < ns.min_v %}{% set ns.min_v = cv %}{% set ns.min_idx\
+        \ = c %}{% endif -%}\n  {% if cv > ns.max_v %}{% set ns.max_v = cv %}{% set\
+        \ ns.max_idx = c %}{% endif -%}\n{% endfor -%}\n{% set diff = ((ns.max_v -\
+        \ ns.min_v) * 1000)|round(0)|int if ns.max_v > 0 else 0 -%}\n{% set badge\
+        \ = '\U0001F7E2 ดีเยี่ยม' if diff < 30 else ('\U0001F7E1 เฝ้าระวัง' if diff\
+        \ < 50 else '\U0001F534 ตรวจสอบ') -%}\n\n#### \U0001F4E6 {{ pack_names[p]\
+        \ }}\n> **⚡ แรงดัน:** {{ '%.2f'|format(v) }} V | **กระแส:** {{ '+' if i >=\
+        \ 0 else '' }}{{ '%.1f'|format(i) }} A | **SOC:** {{ '%.0f'|format(soc) }}%\
+        \ | **อุณหภูมิ:** {{ '%.0f'|format(temp) }}°C | **ดริฟต์:** {{ diff }} mV\
+        \ ({{ badge }})\n\n| เซลล์ 01–05 | เซลล์ 06–10 | เซลล์ 11–15 |\n|:---:|:---:|:---:|\n\
+        {% for row in range(5) -%}\n  {% set c1 = row + 1 %}{% set c2 = row + 6 %}{%\
+        \ set c3 = row + 11 -%}\n  {% set v1 = ns.cells[c1-1] %}{% set v2 = ns.cells[c2-1]\
+        \ %}{% set v3 = ns.cells[c3-1] -%}\n  {% set t1 = (' **' ~ '%.3f'|format(v1)\
+        \ ~ ' V** \U0001F534' if c1 == ns.min_idx else (' **' ~ '%.3f'|format(v1)\
+        \ ~ ' V** \U0001F7E2' if c1 == ns.max_idx else '%.3f'|format(v1) ~ ' V'))\
+        \ -%}\n  {% set t2 = (' **' ~ '%.3f'|format(v2) ~ ' V** \U0001F534' if c2\
+        \ == ns.min_idx else (' **' ~ '%.3f'|format(v2) ~ ' V** \U0001F7E2' if c2\
+        \ == ns.max_idx else '%.3f'|format(v2) ~ ' V')) -%}\n  {% set t3 = (' **'\
+        \ ~ '%.3f'|format(v3) ~ ' V** \U0001F534' if c3 == ns.min_idx else (' **'\
+        \ ~ '%.3f'|format(v3) ~ ' V** \U0001F7E2' if c3 == ns.max_idx else '%.3f'|format(v3)\
+        \ ~ ' V')) -%}\n  | **C{{ '%02d'|format(c1) }}:** {{ t1 }} | **C{{ '%02d'|format(c2)\
+        \ }}:** {{ t2 }} | **C{{ '%02d'|format(c3) }}:** {{ t3 }} |\n{% endfor %}\n\
+        \n{% endfor %}\n"
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: ⚡ ขีดจำกัดความปลอดภัย Inverter (CAN Bus Li2)
+      subtitle: พารามิเตอร์ที่บอร์ดบริดจ์คำนวณและสื่อสารกับ Inverter PowMr แบบเรียลไทม์
+    - type: grid
+      columns: 2
+      square: false
+      cards:
+      - type: custom:mushroom-entity-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_charge_current_limit
+        name: ขีดจำกัดกระแสชาร์จ (CCL)
+        icon: mdi:battery-charging-100
+        icon_color: green
+      - type: custom:mushroom-entity-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_discharge_current_limit
+        name: ขีดจำกัดกระแสจ่าย (DCL)
+        icon: mdi:battery-arrow-down
+        icon_color: blue
+      - type: custom:mushroom-entity-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_max_cell_voltage
+        name: แรงดันเซลล์สูงสุดในระบบ
+        icon: mdi:arrow-up-bold-box
+        icon_color: amber
+      - type: custom:mushroom-entity-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_min_cell_voltage
+        name: แรงดันเซลล์ต่ำสุดในระบบ
+        icon: mdi:arrow-down-bold-box
+        icon_color: cyan
+    - type: custom:mushroom-title-card
+      title: 🛡️ สุขภาพฮาร์ดแวร์ อุณหภูมิ และพลังงานสะสม
+      subtitle: รายงานอุณหภูมิเซลล์ สุขภาพ (SOH) และหน่วยจ่ายไฟสะสมตลอดชีพ
+    - type: markdown
+      content: "### \U0001F6E1️ สุขภาพฮาร์ดแวร์ อุณหภูมิ และพลังงานสะสมรายแพ็ก\n\n\
+        | แพ็ก # | อุณหภูมิเซลล์สูงสุด | สุขภาพแบตเตอรี่ (SOH) | พลังงานจ่ายสะสมตลอดชีพ\
+        \ |\n|:---:|:---:|:---:|:---:|\n{%- for p in range(1, 9) %}\n{%- set temp_ent\
+        \ = 'sensor.huawei_esm_battery_system_pack_' ~ p ~ '_max_cell_temperature'\
+        \ %}\n{%- set temp_val = states(temp_ent)|float(0) %}\n{%- set soh_ent = 'sensor.huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_state_of_health' %}\n{%- set soh_val = states(soh_ent)|float(100)\
+        \ %}\n{%- set dchg_raw = states('sensor.huawei_esm_battery_system_pack_' ~\
+        \ p ~ '_total_discharged_energy')|float(-1) %}\n{%- if dchg_raw < 0 %}\n \
+        \ {%- set dchg_raw = states('sensor.home_energy_huawei_esm_battery_system_pack_'\
+        \ ~ p ~ '_total_discharged_energy')|float(-1) %}\n{%- endif %}\n{%- set dchg_text\
+        \ = '{:,.1f} kWh'.format(dchg_raw / 1000.0) if dchg_raw > 0 else '-' %}\n\
+        {%- set temp_badge = '\U0001F7E2' if temp_val < 38 else ('\U0001F7E1' if temp_val\
+        \ < 45 else '\U0001F534') %}\n| **Pack #{{ p }}** | {{ temp_badge }} {{ '%.0f'|format(temp_val)\
+        \ }} °C | {{ '%.0f'|format(soh_val) }}% (สมบูรณ์) | **{{ dchg_text }}** |\n\
+        {%- endfor %}\n\n> ℹ️ *ข้อมูลฮาร์ดแวร์จริง: อ่านผ่าน Modbus Function 0x03\
+        \ จากรีจิสเตอร์ 0x0004 (SOH), 0x0005 (Temp) และ 0x0042 (Discharged Energy)*\n"
+    - type: custom:mushroom-template-card
+      primary: ดาวน์โหลด Log ความละเอียดสูงจาก MicroSD (.CSV)
+      secondary: แตะเปิดเว็บเซิร์ฟเวอร์บอร์ด Inverter Bridge (http://192.168.8.109:8080)
+        เพื่อดึง Log 1 วินาที
+      icon: mdi:file-delimited-outline
+      icon_color: teal
+      tap_action:
+        action: url
+        url_path: http://192.168.8.109:8080
+- title: Inverter Setup
+  path: inverter-setup
+  icon: mdi:tune-vertical
+  type: masonry
+  badges: []
+  cards:
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: ⚙️ โหมดทำงาน & ลำดับจ่ายไฟ
+      subtitle: Main Priority & AC Grid Specifications
+    - type: custom:mushroom-chips-card
+      alignment: start
+      chips:
+      - type: template
+        icon: mdi:power-settings
+        icon_color: blue
+        content: '{{ states(''sensor.home_energy_em11000_operating_mode'') }}'
+      - type: template
+        icon: mdi:sine-wave
+        icon_color: green
+        content: '{{ states(''sensor.home_energy_em11000_grid_frequency'') }} Hz'
+      - type: template
+        icon: mdi:flash
+        icon_color: amber
+        content: '{{ states(''sensor.home_energy_em11000_output_voltage'') }} V'
+      - type: template
+        icon: mdi:home-lightning-bolt
+        icon_color: purple
+        content: '{{ states(''sensor.home_energy_em11000_load_power'') }} W'
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_read_inverter_settings_now
+        primary: 🔄 อ่านค่าปัจจุบัน (Read Now)
+        secondary: กดเพื่อ Sync พารามิเตอร์ 40 ค่าจาก Inverter
+        icon: mdi:book-sync
+        icon_color: amber
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_read_inverter_settings_now
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_refresh_telemetry
+        primary: ⚡ รีเฟรชสถานะไฟ (Live)
+        secondary: อัปเดตเซนเซอร์พลังงานทันที
+        icon: mdi:refresh
+        icon_color: cyan
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_refresh_telemetry
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_main_output_priority
+      name: Main Output Priority (ลำดับจ่ายโหลด)
+      icon: mdi:power-cycle
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_charger_source_priority
+      name: Charger Priority (ลำดับการชาร์จ)
+      icon: mdi:battery-charging
+    - type: entities
+      title: ⏰ ตั้งเวลาสลับลำดับจ่ายไฟและชาร์จ (Time-of-Use Schedule)
+      show_header_toggle: false
+      entities:
+      - entity: select.home_energy_em11000_secondary_output_priority
+        name: Secondary Output Priority (จ่ายไฟสำรอง)
+        icon: mdi:clock-fast
+      - entity: time.home_energy_em11000_secondary_output_priority_start_time
+        name: เวลาเริ่มจ่ายไฟสำรอง (Output Start Time)
+        icon: mdi:clock-start
+      - entity: time.home_energy_em11000_secondary_output_priority_end_time
+        name: เวลาสิ้นสุดจ่ายไฟสำรอง (Output End Time)
+        icon: mdi:clock-end
+      - type: divider
+      - entity: select.home_energy_em11000_secondary_charging_priority
+        name: Secondary Charging Priority (ชาร์จไฟสำรอง)
+        icon: mdi:battery-clock
+      - entity: time.home_energy_em11000_secondary_charging_priority_start_time
+        name: เวลาเริ่มชาร์จสำรอง (Charging Start Time)
+        icon: mdi:clock-start
+      - entity: time.home_energy_em11000_secondary_charging_priority_end_time
+        name: เวลาสิ้นสุดชาร์จสำรอง (Charging End Time)
+        icon: mdi:clock-end
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_input_mode
+      name: AC Input Range (ย่านไฟหลวง APL/UPS)
+      icon: mdi:transmission-tower
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_output_voltage_setting
+      name: AC Output Voltage (แรงดันไฟออก)
+      icon: mdi:flash-outline
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_output_frequency_setting
+      name: AC Output Frequency (ความถี่ไฟออก)
+      icon: mdi:sine-wave
+    - type: entities
+      title: 🖥️ ตัวเครื่อง หน้าจอ และเสียงแจ้งเตือน
+      show_header_toggle: false
+      entities:
+      - entity: select.home_energy_em11000_buzzer_mode
+        name: Buzzer Mode (เสียงเตือน)
+      - entity: select.home_energy_em11000_lcd_backlight
+        name: LCD Backlight (ไฟหน้าจอ)
+      - entity: select.home_energy_em11000_lcd_automatically_returns_to_the_homepage
+        name: LCD Auto Return (กลับหน้าแรกอัตโนมัติ)
+      - entity: select.home_energy_em11000_overload_transfer_to_bypass_enable
+        name: Overload Bypass (โหลดเกินดึงไฟหลวง)
+      - entity: select.home_energy_em11000_overload_automatic_restart
+        name: Overload Auto Restart (เริ่มใหม่เมื่อหายโหลดเกิน)
+      - entity: select.home_energy_em11000_automatic_restart_when_over_temperature
+        name: Over Temp Auto Restart (เริ่มใหม่เมื่ออุณหภูมิลด)
+      - entity: select.home_energy_em11000_energy_saving_mode_switch
+        name: Energy Saving Mode (โหมดประหยัดพลังงาน)
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: 🔋 พารามิเตอร์แบตเตอรี่ & กระแสชาร์จ
+      subtitle: Battery Chemistry & Current Thresholds
+    - type: custom:mushroom-select-card
+      entity: select.home_energy_em11000_battery_type
+      name: Battery Type (ประเภทแบตเตอรี่)
+      icon: mdi:battery-heart-variant
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: select.home_energy_em11000_battery_type
+        primary: สลับเป็นโหมด Li2
+        secondary: '{% if is_state(''select.home_energy_em11000_battery_type'', ''Li2'')
+          %}🟢 ใช้งานอยู่ (Pylontech CAN){% else %}แตะเพื่อสลับเป็น Li2{% endif %}'
+        icon: mdi:battery-sync
+        icon_color: '{% if is_state(''select.home_energy_em11000_battery_type'', ''Li2'')
+          %}blue{% else %}grey{% endif %}'
+        tap_action:
+          action: call-service
+          service: select.select_option
+          target:
+            entity_id: select.home_energy_em11000_battery_type
+          data:
+            option: Li2
+          confirmation:
+            text: ยืนยันการสลับโหมดแบตเตอรี่เป็น Li2 (Pylontech CAN BMS) ไปยังอินเวอร์เตอร์?
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_apply_user_mode_profile
+        primary: เขียนโปรไฟล์ 15S Huawei
+        secondary: Bulk 54.0V / Float 53.2V
+        icon: mdi:tune-vertical
+        icon_color: green
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_apply_user_mode_profile
+          confirmation:
+            text: 'ยืนยันการตั้งค่า Profile โหมด USER (15S Huawei: Bulk 54.0V, Float
+              53.2V) ไปยังอินเวอร์เตอร์?'
+    - type: entities
+      title: ⚡ พิกัดกระแสชาร์จและคายประจุ
+      show_header_toggle: false
+      entities:
+      - entity: number.home_energy_em11000_maximum_charging_current
+        name: Max Charging Current (กระแสชาร์จรวมสูงสุด)
+      - entity: number.home_energy_em11000_maximum_mains_charging_current
+        name: Max Utility Current (กระแสชาร์จไฟหลวง)
+      - entity: number.home_energy_em11000_maximum_discharge_current_protection
+        name: Max Discharge Current (ตัดกระแสคายประจุ)
+    - type: entities
+      title: 📈 ระดับแรงดันชาร์จ (สำหรับโหมด USER)
+      show_header_toggle: false
+      entities:
+      - entity: number.home_energy_em11000_maximum_charging_voltage
+        name: Bulk Voltage (แรงดันชาร์จสูงสุด)
+      - entity: number.home_energy_em11000_floating_charge_voltage
+        name: Float Voltage (แรงดันเลี้ยงลอยตัว)
+      - entity: number.home_energy_em11000_constant_pressure_to_float_waiting_time
+        name: Float Wait Time (เวลารอเข้าสู่ Float)
+  - type: vertical-stack
+    cards:
+    - type: custom:mushroom-title-card
+      title: 🛡️ จุดตัดความปลอดภัย & ปรับสมดุล (EQ)
+      subtitle: Cut-off Points, Equalization & Tools
+    - type: entities
+      title: ⚠️ จุดตัดแรงดันและกลับไปไฟหลวง
+      show_header_toggle: false
+      entities:
+      - entity: number.home_energy_em11000_mains_mode_battery_discharge_recovery_point
+        name: Back to Grid (กลับไปไฟหลวงเมื่อแบตลดถึง)
+      - entity: number.home_energy_em11000_mains_mode_battery_low_voltage_protection_point
+        name: Low Cut-off (ตัดไฟแบตต่ำในโหมด Grid)
+      - entity: number.home_energy_em11000_off_grid_mode_battery_low_voltage_protection_point
+        name: Off-grid Cut-off (ตัดไฟแบตต่ำในโหมด Off-grid)
+      - entity: number.home_energy_em11000_battery_overvoltage_protection_point
+        name: Overvoltage Cut-off (ตัดแรงดันแบตเกิน)
+    - type: entities
+      title: ⚖️ การปรับสมดุลเซลล์ (Battery Equalization)
+      show_header_toggle: false
+      entities:
+      - entity: select.home_energy_em11000_battery_eq_mode_enable
+        name: Battery EQ Enable (เปิด/ปิด EQ)
+      - entity: number.home_energy_em11000_eq_charging_voltage
+        name: EQ Charging Voltage (แรงดัน EQ)
+      - entity: number.home_energy_em11000_bat_eq_time
+        name: EQ Duration (ระยะเวลาทำ EQ)
+      - entity: number.home_energy_em11000_eq_charging_interval
+        name: EQ Interval (รอบวันทำ EQ)
+      - entity: button.home_energy_em11000_manually_force_eq_to_charge_once
+        name: Force EQ Now (สั่งทำ EQ ทันที)
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_exit_the_fail_lock_state_only_if_the_machine_enters_the_fail_out_mode
+        primary: ปลดล็อก Fault Mode
+        secondary: กดเพื่อปลดล็อก Error
+        icon: mdi:lock-open-alert
+        icon_color: red
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_exit_the_fail_lock_state_only_if_the_machine_enters_the_fail_out_mode
+          confirmation:
+            text: ยืนยันการส่งคำสั่งปลดล็อก Fault Mode ไปยัง Inverter EM11000?
+      - type: custom:mushroom-template-card
+        entity: button.home_energy_em11000_refresh_telemetry
+        primary: รีเฟรชค่าเดี๋ยวนี้
+        secondary: ดึงข้อมูลจากเครื่องทันที
+        icon: mdi:refresh
+        icon_color: cyan
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.home_energy_em11000_refresh_telemetry
+    - type: markdown
+      title: '📋 ตารางค่าแนะนำ: แบตเตอรี่ Huawei ESM 15S'
+      content: '| พารามิเตอร์ | ค่ามาตรฐาน 15S | วัตถุประสงค์ความปลอดภัย |
+
+        |---|:---:|---|
+
+        | **Bulk Charge** | `54.0 V` | เฉลี่ย 3.60V/Cell (ถนอมเซลล์ ไม่บวม) |
+
+        | **Float Charge** | `53.2 V` | เฉลี่ย 3.54V/Cell (ตัดปัญหา Overcharge) |
+
+        | **Back to Grid** | `50.0 V` | เฉลี่ย 3.33V/Cell (~20-25% SOC สำรอง) |
+
+        | **Low Cut-off** | `46.2 V` | เฉลี่ย 3.08V/Cell (ป้องกันคายประจุลึก) |
+
+        | **Max Current** | `140 A` | แบ่งเข้า 8 แพ็ก เฉลี่ย ~17.5A/แพ็ก เย็นเฉียบ
+        |'

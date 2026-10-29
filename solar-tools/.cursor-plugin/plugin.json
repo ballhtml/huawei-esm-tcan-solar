@@ -1,0 +1,22 @@
+{
+  "name": "solar-tools",
+  "displayName": "Solar & Battery ESPHome/HA Tools",
+  "description": "Expert plugin for authoring, debugging, and validating ESPHome Modbus/CAN configurations and Home Assistant solar battery dashboards.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Mooball & Antigravity"
+  },
+  "license": "MIT",
+  "category": "Developer Tools",
+  "keywords": [
+    "esphome",
+    "home-assistant",
+    "solar",
+    "battery",
+    "bms",
+    "modbus",
+    "canbus",
+    "huawei-esm",
+    "pylontech"
+  ]
+}
