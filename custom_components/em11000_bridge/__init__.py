@@ -2,8 +2,8 @@
 EM11000 VIP Cloud Transparent Bridge & High-Speed Local Sensor Component for Home Assistant
 - High-Performance Native BSD Sockets with select() - Zero-lag, Zero-buffer transparent streaming
 - Independent Upstream Lifecycle: Cloud socket EOF / cycling NEVER drops the local Wi-Fi plug session
-- Proven 1:1 bidirectional pipe between Wi-Fi Datalogger (192.168.8.166) and VIP Cloud (vip1.eybond.com:502)
-- Auto-recovers gracefully from 04:00 AM router reboot events
+- Dynamic Zero-Configuration: Auto-detects Home Assistant host IP and Datalogger Serial Number (SN)
+- Auto-recovers gracefully from periodic router reboot events
 - Dedicated Audit Logger to /config/em11000_reboot_audit.log
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import select
 import socket
 import struct
@@ -23,11 +24,16 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 
 from .const import (
     DOMAIN,
-    DEFAULT_PORT,
-    DEFAULT_PLUG_IP,
+    CONF_PLUG_IP,
+    CONF_LISTEN_PORT,
+    CONF_UDP_PORT,
+    CONF_CLOUD_HOST,
+    CONF_CLOUD_PORT,
+    CONF_HA_IP,
+    DEFAULT_LISTEN_PORT,
     DEFAULT_UDP_PORT,
-    CLOUD_HOST,
-    CLOUD_PORT,
+    DEFAULT_CLOUD_HOST,
+    DEFAULT_CLOUD_PORT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,11 +51,24 @@ def audit_log(msg: str) -> None:
     except Exception:
         pass
 
+def get_local_ip() -> str:
+    """Auto-detect primary IPv4 address of this Home Assistant host."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the EM11000 Inverter Bridge component."""
+    conf = config.get(DOMAIN) or {}
     audit_log("[INIT] EM11000 VIP Cloud Resilient Select-Bridge starting up on Home Assistant...")
 
-    bridge = EM11000SelectBridge(hass)
+    bridge = EM11000SelectBridge(hass, conf)
     bridge.start()
     hass.data[DOMAIN] = {"bridge": bridge}
 
@@ -61,11 +80,23 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 class EM11000SelectBridge:
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, config: dict) -> None:
         self.hass = hass
         self.running = True
         self.thread: threading.Thread | None = None
-        self.cloud_ip = "47.239.230.129"
+
+        # Configuration options (with universal standard defaults)
+        self.configured_plug_ip: str | None = config.get(CONF_PLUG_IP)
+        self.listen_port: int = int(config.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT))
+        self.udp_port: int = int(config.get(CONF_UDP_PORT, DEFAULT_UDP_PORT))
+        self.cloud_host: str = config.get(CONF_CLOUD_HOST, DEFAULT_CLOUD_HOST)
+        self.cloud_port: int = int(config.get(CONF_CLOUD_PORT, DEFAULT_CLOUD_PORT))
+        self.ha_ip: str = config.get(CONF_HA_IP) or get_local_ip()
+
+        # Runtime dynamic state
+        self.active_plug_ip: str | None = self.configured_plug_ip
+        self.plug_sn: str | None = None
+        self.cloud_ip: str = "47.239.230.129"
         self.disconnect_time: float | None = time.time()
         self.rearm_count = 0
         self.last_rearm_time = 0.0
@@ -101,31 +132,48 @@ class EM11000SelectBridge:
             u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             u.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             u.settimeout(1.0)
-            msg = b"set>server=192.168.8.209:8899;\r\n"
-            u.sendto(msg, (DEFAULT_PLUG_IP, DEFAULT_UDP_PORT))
-            u.sendto(msg, ("192.168.8.255", DEFAULT_UDP_PORT))
+            msg = f"set>server={self.ha_ip}:{self.listen_port};\r\n".encode("ascii")
+            if self.active_plug_ip:
+                u.sendto(msg, (self.active_plug_ip, self.udp_port))
+            # Broadcast to local subnet
+            u.sendto(msg, ("255.255.255.255", self.udp_port))
             u.close()
-            audit_log(f"[WATCHDOG] Wi-Fi plug offline. Sent UDP rearm #{self.rearm_count} to {DEFAULT_PLUG_IP}:{DEFAULT_UDP_PORT}")
+            target_desc = self.active_plug_ip or "255.255.255.255 (broadcast)"
+            audit_log(f"[WATCHDOG] Wi-Fi plug offline. Sent UDP steering #{self.rearm_count} (server={self.ha_ip}:{self.listen_port}) to {target_desc}:{self.udp_port}")
         except Exception as e:
             _LOGGER.debug("UDP rearm error: %s", e)
 
+    def _update_status(self, status: str, icon: str = "mdi:lan-check") -> None:
+        attrs = {
+            "friendly_name": "EM11000 Bridge Status",
+            "icon": icon,
+            "ha_ip": self.ha_ip,
+            "listen_port": self.listen_port,
+            "cloud": f"{self.cloud_host}:{self.cloud_port} ({self.cloud_ip})",
+        }
+        if self.active_plug_ip:
+            attrs["plug_ip"] = self.active_plug_ip
+        if self.plug_sn:
+            attrs["plug_sn"] = self.plug_sn
+        self.hass.states.set("sensor.home_energy_em11000_bridge_status", status, attrs)
+
     def _run_loop(self) -> None:
         try:
-            self.cloud_ip = socket.gethostbyname(CLOUD_HOST)
+            self.cloud_ip = socket.gethostbyname(self.cloud_host)
         except Exception:
             self.cloud_ip = "47.239.230.129"
 
-        audit_log(f"[RESOLVE] VIP Cloud {CLOUD_HOST} resolved to {self.cloud_ip}:{CLOUD_PORT}")
+        audit_log(f"[RESOLVE] VIP Cloud {self.cloud_host} resolved to {self.cloud_ip}:{self.cloud_port} (HA Host IP: {self.ha_ip})")
 
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            server.bind(("0.0.0.0", DEFAULT_PORT))
+            server.bind(("0.0.0.0", self.listen_port))
             server.listen(2)
             server.settimeout(1.5)
-            audit_log(f"[SERVER] TCP Server listening on 0.0.0.0:{DEFAULT_PORT}. Ready for Wi-Fi Datalogger.")
+            audit_log(f"[SERVER] TCP Server listening on 0.0.0.0:{self.listen_port}. Ready for Wi-Fi Datalogger.")
         except Exception as e:
-            audit_log(f"[BIND_ERROR] Server bind failed: {e}")
+            audit_log(f"[BIND_ERROR] Server bind failed on port {self.listen_port}: {e}")
             return
 
         while self.running:
@@ -134,23 +182,22 @@ class EM11000SelectBridge:
             while self.running and not plug_sock:
                 self.send_rearm_udp()
                 try:
-                    plug_sock, plug_addr = server.accept()
-                    if plug_addr[0] != DEFAULT_PLUG_IP:
-                        audit_log(f"[STRAY_CONN] Rejected non-plug connection from {plug_addr}")
-                        try: plug_sock.close()
+                    sock, plug_addr = server.accept()
+                    # Enforce configured IP filter if explicitly declared
+                    if self.configured_plug_ip and plug_addr[0] != self.configured_plug_ip:
+                        audit_log(f"[STRAY_CONN] Rejected connection from unauthorized IP {plug_addr} (expected {self.configured_plug_ip})")
+                        try: sock.close()
                         except Exception: pass
-                        plug_sock = None
                         continue
+
+                    plug_sock = sock
+                    self.active_plug_ip = plug_addr[0]
                     d_sec = (time.time() - self.disconnect_time) if self.disconnect_time else 0.0
                     audit_log(f"[CONNECT] Wi-Fi Plug connected from {plug_addr} (offline {d_sec:.1f}s, {self.rearm_count} UDP signals). Bridge session ACTIVE.")
                     self.disconnect_time = None
                     self.rearm_count = 0
                     self.last_rearm_time = time.time()
-                    self.hass.states.set(
-                        "sensor.home_energy_em11000_bridge_status",
-                        "Connected",
-                        {"friendly_name": "EM11000 Bridge Status", "icon": "mdi:lan-check", "cloud": f"{self.cloud_ip}:{CLOUD_PORT}"}
-                    )
+                    self._update_status("Connected", "mdi:lan-check")
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -167,9 +214,9 @@ class EM11000SelectBridge:
             try:
                 cloud_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 cloud_sock.settimeout(5.0)
-                cloud_sock.connect((self.cloud_ip, CLOUD_PORT))
+                cloud_sock.connect((self.cloud_ip, self.cloud_port))
                 cloud_sock.setblocking(False)
-                audit_log(f"[UPSTREAM] Connected upstream to VIP Cloud {self.cloud_ip}:{CLOUD_PORT} successfully!")
+                audit_log(f"[UPSTREAM] Connected upstream to VIP Cloud {self.cloud_ip}:{self.cloud_port} successfully!")
             except Exception as e:
                 audit_log(f"[UPSTREAM_ERR] Initial cloud connection failed ({e}). Plug remains active, will connect on-demand.")
                 cloud_sock = None
@@ -207,14 +254,22 @@ class EM11000SelectBridge:
                         pkt_plug += 1
                         self.frames_plug_to_cloud += 1
 
+                        # Auto-extract 14-char Plug Serial Number if not yet discovered
+                        if not self.plug_sn:
+                            m_sn = re.search(rb"[0-9A-Z]{14}", data)
+                            if m_sn:
+                                self.plug_sn = m_sn.group(0).decode("ascii")
+                                audit_log(f"[DISCOVERY] Auto-detected Datalogger Plug Serial Number: {self.plug_sn}")
+                                self._update_status("Connected", "mdi:lan-check")
+
                         # Connect cloud on-demand if closed
                         if cloud_sock is None:
                             try:
                                 cloud_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                 cloud_sock.settimeout(4.0)
-                                cloud_sock.connect((self.cloud_ip, CLOUD_PORT))
+                                cloud_sock.connect((self.cloud_ip, self.cloud_port))
                                 cloud_sock.setblocking(False)
-                                audit_log(f"[UPSTREAM] Cloud socket reconnected on-demand to {self.cloud_ip}:{CLOUD_PORT}")
+                                audit_log(f"[UPSTREAM] Cloud socket reconnected on-demand to {self.cloud_ip}:{self.cloud_port}")
                             except Exception as e:
                                 audit_log(f"[UPSTREAM_RETRY_ERR] {e}")
                                 cloud_sock = None
@@ -270,11 +325,7 @@ class EM11000SelectBridge:
                 except Exception: pass
 
             self.disconnect_time = time.time()
-            self.hass.states.set(
-                "sensor.home_energy_em11000_bridge_status",
-                "Re-arming",
-                {"friendly_name": "EM11000 Bridge Status", "icon": "mdi:lan-disconnect"}
-            )
+            self._update_status("Re-arming", "mdi:lan-disconnect")
             audit_log("[WAIT] Plug session ended. Re-arming for next connection...")
             time.sleep(0.5)
 
