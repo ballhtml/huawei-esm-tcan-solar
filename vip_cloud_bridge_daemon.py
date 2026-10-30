@@ -1,15 +1,15 @@
 """
 EM11000 VIP Cloud Persistent Transparent Bridge Daemon
-Pipes Wi-Fi Datalogger Plug (192.168.8.166) directly to DessMonitor VIP Cloud (vip1.eybond.com:502 / 47.239.230.129:502).
+Pipes Wi-Fi Datalogger Plug directly to DessMonitor VIP Cloud (vip1.eybond.com:18899).
 Maintains continuous keepalive so SmartESS app stays GREEN and updates every 5 seconds!
 """
 
-import socket, select, time, struct, binascii, sys
+import socket, select, time, struct, binascii, sys, os
 
 LOCAL_PORT = 8899
 CLOUD_HOST = 'vip1.eybond.com'
-CLOUD_PORT = 502
-PLUG_IP = '192.168.8.166'
+CLOUD_PORT = 18899
+PLUG_IP = os.environ.get('PLUG_IP', '')
 PLUG_UDP_PORT = 58899
 
 LOG_FILE = r'z:\modbus\scratch\vip_bridge.log'
@@ -33,7 +33,7 @@ def get_local_ip():
         s.close()
         return ip
     except Exception:
-        return "192.168.8.209"
+        return "127.0.0.1"
 
 LOCAL_IP = get_local_ip()
 

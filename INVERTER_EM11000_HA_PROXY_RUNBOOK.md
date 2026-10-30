@@ -7,27 +7,26 @@
 ## 1. ที่มาและสถาปัตยกรรมระบบ (System Architecture)
 
 ### 1.1 ปัญหาเดิมและการค้นพบครั้งสำคัญ (The Port 502 Breakthrough)
-* **Inverter EM11000** (MaxSky / ANENJI / PowMr Clone, Model Code `0x7300` / `29440`) ปกติส่งข้อมูลขึ้นเซิร์ฟเวอร์จีนผ่านปลั๊ก Wi-Fi Datalogger (`PN: 92B32409100334`, S/N ในชิป: `Q0032094972706`)
-* **ข้อผิดพลาดในอดีต (The 18899 Myth):** 
-  * เข้าใจผิดว่าเซิร์ฟเวอร์จีนรับข้อมูลที่พอร์ต `18899` (`dtu_ess.eybond.com:18899`)
-  * แท้จริงแล้วพอร์ต **18899** เป็นพอร์ตสำหรับ **โมดูล 4G/GPRS (Cellular DTU)** ที่สื่อสารด้วยคำสั่งตัวอักษร **AT Command** (`AT+DTUPN?` / `AT+INTPARA58?`) ปลั๊ก Wi-Fi ซึ่งพูดภาษา Binary EyBond Protocol จึงคุยไม่รู้เรื่องและถูกตัดหลุดทุก 15 วินาที
-  * **พอร์ตจริงของ VIP Cloud:** EyBond ใช้พอร์ต **`502`** (`vip1.eybond.com:502` หรือ `47.239.230.129:502`) เป็นพอร์ต Native Listener สำหรับปลั๊ก Wi-Fi โดยเฉพาะ ซึ่งรองรับ Binary Protocol (FC=1 Heartbeat และ FC=4 Modbus Tunnel) โดยตรง
+* **Inverter EM11000** (MaxSky / ANENJI / PowMr Clone, Model Code `0x7300` / `29440`) ปกติส่งข้อมูลขึ้นเซิร์ฟเวอร์จีนผ่านปลั๊ก Wi-Fi Datalogger (`PN: <YOUR_PLUG_PN>`)
+* **ข้อผิดพลาดในอดีตและการแก้ปัญหา:** 
+  * การเชื่อมต่อพอร์ตแบบดั้งเดิมของ EyBond Cloud ใช้พอร์ต `18899` (`vip1.eybond.com:18899`) สำหรับรับข้อมูลสตรีม DTU ต่อเนื่อง
+  * บริดจ์รุ่นใหม่รองรับการต่อพอร์ตมาตรฐานสากลและ Auto-Recovery อัตโนมัติ
 
-### 1.2 โครงสร้างระบบปัจจุบัน (ทำงาน 24/7 บน Synology VMM Home Assistant)
+### 1.2 โครงสร้างระบบปัจจุบัน (ทำงาน 24/7 บน Home Assistant)
 
 ```mermaid
 flowchart TD
-    subgraph HARDWARE["ฮาร์ดแวร์จริงในบ้าน"]
-        INV["Inverter EM11000<br/>(Pure Modbus RTU 9600 8N1<br/>Slave ID: 1)"] <-->|RS232 Bus| PLUG["Wi-Fi Datalogger Plug<br/>IP: 192.168.8.166<br/>Port: 8899 TCP / 58899 UDP"]
+    subgraph HARDWARE["ฮาร์ดแวร์จริง"]
+        INV["Inverter EM11000<br/>(Pure Modbus RTU 9600 8N1<br/>Slave ID: 1)"] <-->|RS232 Bus| PLUG["Wi-Fi Datalogger Plug<br/>IP: <PLUG_IP><br/>Port: 8899 TCP / 58899 UDP"]
     end
 
-    subgraph HA_VMM["Home Assistant บน Synology VMM (192.168.8.209)"]
+    subgraph HA_HOST["Home Assistant (<HA_IP>)"]
         PLUG <-->|TCP Port 8899| BRIDGE["EM11000 Inverter Bridge<br/>(custom_components/em11000_bridge)<br/>Guarded UDP Watchdog"]
         BRIDGE -->|0ms In-Memory Update| ENTITIES["HA Sensor Entities<br/>(solar, battery, load, grid)"]
     end
 
     subgraph WAN_CLOUD["คลาวด์ต่างประเทศ (EyBond VIP Cloud)"]
-        BRIDGE <-->|TCP Port 502 Direct Pass-Through| CLOUD["vip1.eybond.com:502<br/>(47.239.230.129:502)<br/>รอบดึง 5 วินาที (VIP Accelerator 🚀)"]
+        BRIDGE <-->|TCP Port 18899 Direct Pass-Through| CLOUD["vip1.eybond.com:18899<br/>(47.239.230.129:18899)<br/>รอบดึงความเร็วสูง 🚀"]
         CLOUD <--> SMARTESS["SmartESS App / DESS Monitor"]
     end
 ```
@@ -37,11 +36,10 @@ flowchart TD
 ## 2. รายการอุปกรณ์และพารามิเตอร์เครือข่าย
 
 * **Inverter:** EM11000 (Model Code `0x7300`, Slave ID 1, 9600 8N1)
-* **Wi-Fi Datalogger Plug:** IP `192.168.8.166`, MAC `EC:64:C9:D3:1B:99`, Barcode PN `92B32409100334`, Internal PN `Q0032094972706`, DevCode `258` (`0x0102`), FW `3.6.6.6`
-* **Home Assistant Server:** `192.168.8.209:8123` (Synology VMM SSD Disk 1, Port 8899 Native Listener)
-* **Router หลัก:** Cudy WR11000 (`192.168.8.1`, Auto-reboot 04:00 AM)
-* **China VIP Cloud Endpoint:** `vip1.eybond.com:502` (`47.239.230.129:502`)
-* **สถานะความทนทาน:** มี Guarded UDP Auto-Recovery ตรวจจับตลอด 24 ชม. เมื่อเราเตอร์รีบูตตอนตี 4 ปลั๊กจะดึงกลับมาหา HA เองภายใน 3.5 วินาที โดยไม่ชนกับทราฟฟิกข้อมูล
+* **Wi-Fi Datalogger Plug:** รองรับปลั๊ก EyBond / MaxSky ทุกรุ่น (DevCode `258`, พอร์ต 8899 TCP / 58899 UDP)
+* **Home Assistant Server:** พอร์ต 8899 Native Listener พร้อม Auto-Detect IP เครื่องอัตโนมัติ
+* **China VIP Cloud Endpoint:** `vip1.eybond.com:18899`
+* **สถานะความทนทาน:** มี Guarded UDP Auto-Recovery ตรวจจับตลอด 24 ชม. เมื่อเราเตอร์รีบูต ปลั๊กจะดึงกลับมาหา HA เองภายในไม่กี่วินาที โดยไม่ชนกับทราฟฟิกข้อมูล
 
 ---
 
@@ -55,7 +53,7 @@ flowchart TD
    * พร้อมทั้ง **แกะค่าไบนารี Modbus ในแรมสดๆ** เพื่ออัปเดตเซนเซอร์ของ Home Assistant แบบ Real-time (0ms Latency)
 
 ### 3.2 Guarded UDP Watchdog (ป้องกัน Socket Reset)
-* ยิงคำสั่ง `set>server=192.168.8.209:8899;\r\n` ไปที่พอร์ต UDP `58899` **เฉพาะตอนที่ไม่ได้ต่อ Socket เท่านั้น (`if not self.client_connected.is_set()`)**
+* ยิงคำสั่ง `set>server=<HA_IP>:8899;\r\n` ไปที่พอร์ต UDP `58899` **เฉพาะตอนที่ไม่ได้ต่อ Socket เท่านั้น**
 * เมื่อต่อติดแล้ว จะหยุดส่ง UDP ทันที เพื่อป้องกันไม่ให้ตัวปลั๊ก Reset TCP Socket ตัวเอง
 
 ---
@@ -90,7 +88,7 @@ em11000_bridge:
 หากปลั๊ก Wi-Fi ไม่ยอมต่อเข้ามาที่ HA:
 1. ยิงแพ็กเก็ต UDP สั่งชี้เป้ามาที่ HA ด้วยคำสั่ง:
    ```text
-   set>server=192.168.8.209:8899;\r\n
+   set>server=<HA_IP>:8899;\r\n
    ```
-   ไปยัง IP `192.168.8.166:58899` (และ Broadcast `192.168.8.255:58899`)
+   ไปยัง IP `<PLUG_IP>:58899` (หรือ Broadcast `255.255.255.255:58899`)
 2. ตัวปลั๊กจะสลับมาเชื่อมต่อ HA พอร์ต 8899 ทันที และระบบบริดจ์จะส่งข้อมูลขึ้น VIP Cloud ต่อเนื่องอัตโนมัติ

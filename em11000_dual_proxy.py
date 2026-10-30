@@ -2,7 +2,7 @@
 EM11000 Autonomous Dual-Route Proxy & Poller
 - Local High-Speed Polling (2.5s) -> Home Assistant REST API
 - Cloud Upstream Forwarding (5.0s) -> China Cloud (dtu_ess.eybond.com:18899)
-- Target: Inverter EM11000 via Wi-Fi Datalogger Plug (92B32409100334)
+- Target: Inverter EM11000 via Wi-Fi Datalogger Plug
 - Resilient Auto-Token Refresh & China Cloud EOF / CLOSE_WAIT recovery
 """
 
@@ -31,15 +31,15 @@ else:
     except Exception:
         pass
 
-# Configuration
-LOCAL_IP = '192.168.8.160'       # Host IP running this proxy
-PLUG_IP = '192.168.8.166'        # Datalogger plug IP
-HA_HOST = '192.168.8.209'        # Home Assistant IP
-HA_PORT = 8123
+# Configuration (Environment variables with clean defaults)
+LOCAL_IP = os.environ.get('LOCAL_IP', '127.0.0.1')
+PLUG_IP = os.environ.get('PLUG_IP', '')
+HA_HOST = os.environ.get('HA_HOST', 'homeassistant.local')
+HA_PORT = int(os.environ.get('HA_PORT', 8123))
 LOCAL_PORT = 8899                # EyBond local server port
 CLOUD_HOST = 'vip1.eybond.com'     # True VIP Cloud for Wi-Fi Datalogger
-CLOUD_PORT = 502                   # True EyBond native binary listener (NOT 18899 AT-terminal)
-PLUG_SN = '92B32409100334'
+CLOUD_PORT = 18899
+PLUG_SN = os.environ.get('PLUG_SN', '')
 
 POLL_INTERVAL_LOCAL = 3.5        # 3.5s smooth local polling (calm, steady display)
 FORWARD_INTERVAL_CLOUD = 5.0     # 5.0s mirror copy for SmartESS app
@@ -58,7 +58,10 @@ def load_refresh_token_info():
     """Load the first working refresh token info from HA storage."""
     global _HA_REFRESH_TOKEN_INFO
     try:
-        auth_data = json.load(open(r'\\192.168.8.209\config\.storage\auth', encoding='utf-8'))
+        auth_path = os.environ.get('HA_AUTH_PATH', r'\\homeassistant.local\config\.storage\auth')
+        if not os.path.exists(auth_path):
+            return None
+        auth_data = json.load(open(auth_path, encoding='utf-8'))
         for t in auth_data['data']['refresh_tokens']:
             cid = t.get('client_id')
             token_val = t.get('token')

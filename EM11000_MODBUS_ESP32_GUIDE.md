@@ -116,7 +116,7 @@ flowchart LR
 | **PV2 Voltage / Bus** | `303` | `0x012F` | `917` | $\times 0.1$ | V | แรงดันแผงชุดที่ 2 หรือ Bus Voltage |
 | **Output Current** | `304` | `0x0130` | `180` | $\times 0.1$ | A | กระแสโหลดขาออก (18.0 A) |
 | **Output Frequency** | `305` | `0x0131` | `49` หรือ `50` | 1 | Hz | ความถี่กระแสสลับ (49-50 Hz) |
-| **Datalogger SN (ASCII)** | `186 - 192` | `0x00BA - 0x00C0` | `92B32409100334` | Text | - | Serial Number ประจำตัวปลั๊ก (14 Bytes) |
+| **Datalogger SN (ASCII)** | `186 - 192` | `0x00BA - 0x00C0` | `<YOUR_PLUG_SN>` | Text | - | Serial Number ประจำตัวปลั๊ก (14 Bytes) |
 | **Inverter Model Code** | `171` | `0x00AB` | `29440` (`0x7300`)| Hex | - | รหัสรุ่นเครื่อง EM11000 |
 
 ---
@@ -275,7 +275,7 @@ sensor:
 
 ในกรณีที่ต้องการใช้งานทั้ง **Home Assistant ภายในบ้าน** และ **แอปจีน (SmartESS)** พร้อมกัน:
 1. ปล่อยให้ปลั๊ก Wi-Fi เดิมของจีนเสียบคาไว้ตามปกติ
-2. กำหนดให้ Home Assistant (`192.168.8.209`) ทำหน้าที่เป็น **Transparent Proxy (ผ่าน custom_components/eybond_local)**:
+2. กำหนดให้ Home Assistant (`<HA_IP>`) ทำหน้าที่เป็น **Transparent Proxy (ผ่าน custom_components/em11000_bridge)**:
    * HA รับข้อมูลจากปลั๊กที่ Port `8899` ด้วยสปีดเร็วสูง 1-2 วินาที
    * HA ส่งต่อเฟรม Mirror ไปยังเซิร์ฟเวอร์จีน `8.218.202.213:18899` ทุกๆ 5 วินาที
 3. **ผลลัพธ์:** แอปบนมือถือจะมองเห็นอินเวอร์เตอร์ออนไลน์ตลอดเวลา และ HA ก็จะได้ข้อมูลอัปเดตแบบ Real-time โดยไม่สูญเสียฟังก์ชันใดๆ ทั้งสองฝั่ง

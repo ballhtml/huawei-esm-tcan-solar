@@ -16,11 +16,11 @@ Provide an industrial-grade, responsive, 100% local-first monitoring and control
 
 ## Positioning
 
-Unlike generic cloud portals (DessMonitor, SolarMAN) that suffer from network latency, rate limits, and packet drops, this unified Home Assistant system combines direct edge hardware bridges (ESPHome T-CAN485 on `192.168.8.108` and `192.168.8.109`) and hardened local integration to deliver sub-second telemetry, real-time cell matrix visualization, and automated financial accounting on the local home network.
+Unlike generic cloud portals (DessMonitor, SolarMAN) that suffer from network latency, rate limits, and packet drops, this unified Home Assistant system combines direct edge hardware bridges (ESPHome T-CAN485 controllers) and hardened local integration to deliver sub-second telemetry, real-time cell matrix visualization, and automated financial accounting on the local home network.
 
 ## Operating Context
 
-- **Environment:** Local home network (`192.168.8.x`), accessible 24/7 via Home Assistant companion app, iPad wall tablet, PC workstation, and 2.8" CYD desktop monitor.
+- **Environment:** Local network, accessible 24/7 via Home Assistant companion app, iPad wall tablet, PC workstation, and 2.8" CYD desktop monitor.
 - **Physical System:** 8x Huawei ESM-48100B1 48V 100Ah LiFePO4 battery packs in parallel (800 Ah / 38.4 kWh total capacity), ANENJI EM11000 11kW hybrid inverter, PEA single-phase grid connection, dual ESP32 T-CAN485 controllers with isolated RS485 and CAN buses.
 - **Rituals:** Morning PV ramp verification, peak afternoon charge taper and cell balance audit, evening off-grid battery discharge monitoring, and monthly PEA billing reconciliation on the 20th.
 
@@ -54,7 +54,7 @@ Unlike generic cloud portals (DessMonitor, SolarMAN) that suffer from network la
 
 ## Evidence on Hand
 
-- Board 108: Master Battery Controller & Aggregator on `192.168.8.108` (`huawei-esm-t-can485-8pack.yaml`).
-- Board 109: Inverter Pylontech Bridge & Pack 8 on `192.168.8.109` (`huawei-esm-tcan-inverter-bridge.yaml`).
-- Home Assistant Server on `192.168.8.209:8123` (`lovelace.home_energy`).
+- Board 108: Master Battery Controller & Aggregator (`huawei-esm-t-can485-8pack.yaml`).
+- Board 109: Inverter Pylontech Bridge & Pack 8 (`huawei-esm-tcan-inverter-bridge.yaml`).
+- Home Assistant Server (`lovelace.home_energy`).
 - Verified zero Modbus Exception 2 errors and hardened cloud coordinator fallback.

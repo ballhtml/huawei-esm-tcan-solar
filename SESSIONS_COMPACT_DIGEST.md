@@ -29,10 +29,10 @@
 
 ---
 
-## 3. Inverter EM11000 Local Transparent Proxy
-* **สถาปัตยกรรม:** `em11000_dual_proxy.py` รันบน Synology / Home Assistant (`192.168.8.209`)
+## 3. Inverter EM11000 Local Transparent Proxy & Bridge
+* **สถาปัตยกรรม:** รันผ่าน Home Assistant Custom Integration (`custom_components/em11000_bridge`)
 * **การทำงาน:**
-  * ปลั๊ก Wi-Fi Datalogger เดิม (`192.168.8.166`) ถูกเปลี่ยนปลายทางเซิร์ฟเวอร์ผ่านคำสั่ง UDP 58899 (`set>server=...`)
+  * ปลั๊ก Wi-Fi Datalogger ถูกเปลี่ยนปลายทางเซิร์ฟเวอร์มาที่ Home Assistant ผ่านคำสั่ง UDP 58899 (`set>server=...`)
   * Proxy รับ TCP พอร์ต 8899 ดึงค่า Modbus RTU (Slave ID 1, 9600 8N1) ทุก 2.0 วินาที แล้ว Push เข้า Home Assistant REST API
   * Proxy ส่งสำเนาข้อมูล (Mirror) ต่อไปยังคลาวด์จีน `dtu_ess.eybond.com:18899` ทุก 5.0 วินาที ทำให้แอป SmartESS/DESS ทำงานได้ปกติ
 * **การต่อบอร์ด ESP32 ตรงในอนาคต (ถ้าทำ):**

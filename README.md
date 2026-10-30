@@ -51,7 +51,7 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
                                         └─────────────────────┐               ┌─────────────────────────────┘
                                                               ▼               ▼
                                                    ┌─────────────────────────────────────┐
-                                                   │   LILYGO T-CAN485 Controller (ESP32)│ (IP: 192.168.8.108)
+                                                   │   LILYGO T-CAN485 Controller (ESP32)│ (e.g. <DEVICE_IP>)
                                                    │  - ESPHome Modbus Pacing Engine     │
                                                    │  - Pylontech CAN Emulator (TWAI)    │
                                                    └──────────────────┬──────────────────┘
@@ -101,7 +101,7 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
 Copy `tcan_telemetry_shared.h` and `huawei-esm-t-can485-8pack.yaml` into your ESPHome directory:
 ```bash
 esphome compile huawei-esm-t-can485-8pack.yaml
-esphome upload huawei-esm-t-can485-8pack.yaml --device 192.168.8.108
+esphome upload huawei-esm-t-can485-8pack.yaml --device <DEVICE_IP>
 ```
 
 ### 2. Deploy EyBond VIP Cloud Bridge on Home Assistant

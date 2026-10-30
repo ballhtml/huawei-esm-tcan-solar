@@ -362,52 +362,28 @@ views:
     - type: markdown
       content: "{% set packs = [\n  {'num': 1, 'v': states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_1_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_1_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_1_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_1_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_1_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_1_state_of_charge')},\n\
         \  {'num': 2, 'v': states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_2_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_2_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_2_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_2_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_2_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_2_state_of_charge')},\n\
         \  {'num': 3, 'v': states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_3_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_3_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_3_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_3_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_3_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_3_state_of_charge')},\n\
         \  {'num': 4, 'v': states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_4_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_4_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_4_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_4_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_4_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_4_state_of_charge')},\n\
         \  {'num': 5, 'v': states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_5_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_5_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_5_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_5_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_5_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_5_state_of_charge')},\n\
         \  {'num': 6, 'v': states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_6_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_6_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_6_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_6_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_6_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_6_state_of_charge')},\n\
         \  {'num': 7, 'v': states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_7_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_7_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_7_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_7_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_7_total_discharged_energy')|float(0)},\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_7_state_of_charge')},\n\
         \  {'num': 8, 'v': states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0),\n\
         \   'i': states('sensor.huawei_esm_battery_system_pack_8_current')|float(0),\n\
-        \   'soc': states('sensor.huawei_esm_battery_system_pack_8_state_of_charge'),\n\
-        \   'soh': states('sensor.huawei_esm_battery_system_pack_8_state_of_health')|float(100),\n\
-        \   'mode': states('sensor.huawei_esm_battery_system_pack_8_bms_operating_mode')|int(0),\n\
-        \   'wh': states('sensor.huawei_esm_battery_system_pack_8_total_discharged_energy')|float(0)}\n\
+        \   'soc': states('sensor.huawei_esm_battery_system_pack_8_state_of_charge')}\n\
         ] %}\n{%- set active = packs | rejectattr('soc', 'in', ['unknown', 'unavailable'])\
         \ | selectattr('v', 'gt', 20.0) | list %}\n{%- set total_i = active | map(attribute='i')\
         \ | sum %}\n{%- set is_charging = total_i >= 0 %}\n{%- set sorted_packs =\
@@ -415,17 +391,17 @@ views:
         \ sorted_packs[0] if sorted_packs | length > 0 else none %}\n{% if top_pack\
         \ and top_pack.i < -1.0 %}\n> ⚡ **จ่ายไฟหนักสุด:** **Pack {{ top_pack.num\
         \ }}** ({{ '%+.2f' | format(top_pack.i) }} A / {{ '%+.0f' | format(top_pack.v\
-        \ * top_pack.i) }} W)\n{% elif top_pack and top_pack.i > 1.0 %}\n> \U0001F50B\
+        \ * top_pack.i) }} W)\n{% elif top_pack and top_pack.i > 2.0 %}\n> \U0001F50B\
         \ **รับชาร์จไฟสูงสุด:** **Pack {{ top_pack.num }}** ({{ '%+.2f' | format(top_pack.i)\
         \ }} A / {{ '%+.0f' | format(top_pack.v * top_pack.i) }} W)\n{% else %}\n\
         > \U0001F4A4 **สถานะรวม:** สแตนด์บาย / กระแสนิ่งสมดุล\n{% endif %}\n<center>\n\
         <table style=\"margin: 0 auto !important; border-collapse: collapse; text-align:\
-        \ center; font-size: 13.5px; white-space: nowrap;\">\n  <thead>\n    <tr style=\"\
+        \ center; font-size: 14px; white-space: nowrap;\">\n  <thead>\n    <tr style=\"\
         background: rgba(255,255,255,0.03); color: var(--secondary-text-color, #9e9e9e);\"\
         >\n      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 10px; font-weight: 600; text-align: center;\">#</th>\n    \
         \  <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; font-weight: 600; text-align: center;\">โหมด BMS</th>\n\
+        \ padding: 8px 14px; font-weight: 600; text-align: center;\">สถานะ</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 12px; font-weight: 600; text-align: center;\">กระแส&nbsp;(A)</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
@@ -433,39 +409,32 @@ views:
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
         \ padding: 8px 10px; font-weight: 600; text-align: center;\">แรงดัน&nbsp;(V)</th>\n\
         \      <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; font-weight: 600; text-align: center;\">SOC</th>\n  \
-        \    <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; font-weight: 600; text-align: center;\">SOH</th>\n  \
-        \    <th style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; font-weight: 600; text-align: center;\">จ่ายสะสม</th>\n\
-        \    </tr>\n  </thead>\n  <tbody>\n    {% for p in sorted_packs -%}\n    {%\
-        \ set icon = '\U0001F947 ' ~ p.num if loop.index == 1 else ('\U0001F948 '\
-        \ ~ p.num if loop.index == 2 else ('\U0001F949 ' ~ p.num if loop.index ==\
-        \ 3 else p.num)) -%}\n    {% set bms_status = '\U0001F7E2 ชาร์จ' if p.mode\
-        \ == 2 else ('⚡ จ่ายไฟ' if p.mode == 3 else ('⚪ พัก' if (p.mode == 4 or (p.mode\
-        \ == 0 and p.i|abs <= 0.3)) else ('\U0001F7E2 ชาร์จ' if p.i > 0.5 else ('⚡\
-        \ จ่ายไฟ' if p.i < -0.5 else '⚪ พัก')))) -%}\n    {% set kwh_str = '{:,.0f}\
-        \ kWh'.format(p.wh / 1000.0) if p.wh > 0 else '-' -%}\n    <tr>\n      <td\
-        \ style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; font-weight: bold; text-align: center;\">{{ icon }}</td>\n\
+        \ padding: 8px 12px; font-weight: 600; text-align: center;\">SOC</th>\n  \
+        \  </tr>\n  </thead>\n  <tbody>\n    {% for p in sorted_packs -%}\n    {%\
+        \ set icon = '\U0001F947&nbsp;' ~ p.num if loop.index == 1 else ('\U0001F948\
+        &nbsp;' ~ p.num if loop.index == 2 else ('\U0001F949&nbsp;' ~ p.num if loop.index\
+        \ == 3 else p.num)) -%}\n    {% set status = '<span style=\"color:#4caf50;\
+        \ font-weight:600;\">\U0001F7E2&nbsp;ชาร์จ</span>' if p.i > 2.0 else ('<span\
+        \ style=\"color:#f44336; font-weight:600;\">\U0001F534&nbsp;จ่ายไฟหลัก</span>'\
+        \ if p.i < -8.0 else ('<span style=\"color:#ff9800; font-weight:600;\">⚡&nbsp;จ่ายไฟ</span>'\
+        \ if p.i < -1.0 else '<span style=\"color:#9e9e9e;\">⚪&nbsp;สแตนด์บาย</span>'))\
+        \ -%}\n    {% set soc_val = p.soc | float(0) -%}\n    {% set soc_col = '#e74c3c'\
+        \ if soc_val < 25 else ('#f39c12' if soc_val < 60 else '#2ecc71') -%}\n  \
+        \  <tr>\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 9px 10px; font-weight: bold; text-align: center;\">{{ icon }}</td>\n\
         \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 10px; text-align: center;\">{{ bms_status }}</td>\n      <td\
-        \ style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
-        \ padding: 8px 12px; font-weight: bold; text-align: center; color: {{ '#4caf50'\
-        \ if p.i > 0.3 else ('#ff9800' if p.i < -0.3 else 'inherit') }};\">{{ '%+.2f'\
-        \ | format(p.i) }} A</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 8px 10px; text-align: center;\">{{ '%+.0f'\
-        \ | format(p.v * p.i) }} W</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 8px 10px; text-align: center;\">{{ '%.1f'\
-        \ | format(p.v) }} V</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 8px 10px; font-weight: bold; text-align:\
-        \ center;\">{{ '%.0f' | format(p.soc|float(0)) }}%</td>\n      <td style=\"\
-        border: 1px solid var(--divider-color, rgba(127,127,127,0.18)); padding: 8px\
-        \ 10px; text-align: center; color: #4caf50; font-weight: 600;\">{{ '%.0f'\
-        \ | format(p.soh) }}%</td>\n      <td style=\"border: 1px solid var(--divider-color,\
-        \ rgba(127,127,127,0.18)); padding: 8px 10px; font-size: 12.5px; text-align:\
-        \ center; color: var(--secondary-text-color);\">{{ kwh_str }}</td>\n    </tr>\n\
-        \    {% endfor %}\n  </tbody>\n</table>\n</center>"
+        \ padding: 9px 14px; text-align: center;\">{{ status }}</td>\n      <td style=\"\
+        border: 1px solid var(--divider-color, rgba(127,127,127,0.18)); padding: 9px\
+        \ 12px; font-weight: bold; text-align: center; color: {{ '#4caf50' if p.i\
+        \ > 1.0 else ('#ff9800' if p.i < -1.0 else 'inherit') }};\">{{ '%+.2f' | format(p.i)\
+        \ }} A</td>\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 9px 10px; text-align: center;\">{{ '%+.0f' | format(p.v * p.i)\
+        \ }} W</td>\n      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 9px 10px; text-align: center;\">{{ '%.1f' | format(p.v) }} V</td>\n\
+        \      <td style=\"border: 1px solid var(--divider-color, rgba(127,127,127,0.18));\
+        \ padding: 9px 12px; font-weight: bold; text-align: center; color: {{ soc_col\
+        \ }};\">{{ '%.0f' | format(soc_val) }}%</td>\n    </tr>\n    {% endfor %}\n\
+        \  </tbody>\n</table>\n</center>"
     - type: grid
       columns: 4
       square: false
