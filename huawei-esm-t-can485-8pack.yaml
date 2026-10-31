@@ -1,6 +1,11 @@
 # ==============================================================================
 # ESPHome Configuration for LILYGO T-CAN485 + Huawei ESM-48100B1 BMS (8-Pack Ready)
-# Version: 6.3.0 Enterprise (Green Activity Pulse LED with Instant Transition)
+# Version: 6.4.0 (Absorption Voltage Clamping + ESP-NOW Tri-Redundant Link)
+# Changelog:
+#   - v6.4.0: Added Absorption Voltage Clamping (CV Clamping at 53.4V on cell >3.50V)
+#             Added Tri-Redundant ESP-NOW Hot-Failover Link (<2000ms stale CAN detection)
+#             Added Pack 8 ESP-NOW summary reception & 120-cell bank max/min cell tracking
+#   - v6.3.0: Enterprise Green Activity Pulse LED with Instant Transition
 # ==============================================================================
 
 esphome:
@@ -59,8 +64,8 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 wifi:
-  ssid: "Home_Ball"
-  password: "99999999"
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
   manual_ip:
     static_ip: 192.168.8.108
     gateway: 192.168.8.1

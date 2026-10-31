@@ -117,3 +117,4 @@ syssi-smg-ii.yaml
 *.factory.bin
 firmware.bin
 flash_*.bat
+_backup_production/

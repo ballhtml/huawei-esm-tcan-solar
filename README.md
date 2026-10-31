@@ -21,13 +21,23 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
    * Embedded C++ TWAI driver (`stitched_pylontech_emulator.h`) running on ESP32 broadcasts standard Pylontech protocol frames (`0x351`, `0x355`, `0x356`, `0x359`, `0x35C`, `0x35E`) at 500 kbps.
    * Dynamically calculates **Charge Current Limit (CCL)** and **Discharge Current Limit (DCL)** based on lowest/highest pack voltages and cell temperatures, enforcing closed-loop inverter protection.
 
-3. **EyBond Wi-Fi Datalogger VIP Transparent Bridge (Port 502):**
+3. **Absorption Voltage Clamping (Equalized Multi-Pack Full Charging):**
+   * Eliminates the classic multi-pack starvation issue when charging at high current (100A-140A) near full SOC.
+   * When the strongest cell across the 120 cells reaches 3.50V, the emulator clamps Target Charge Voltage (CV) to 53.4V (relaxing current throttling) instead of choking the entire bank's CCL down to 10A-15A.
+   * Fully charged packs naturally taper charging current to 0A ($I = \Delta V / R$), while trailing packs continue charging at full speed until all 8 packs reach equilibrium without tripping BMS cell-overvoltage protection.
+
+4. **Tri-Redundant Interconnect Link (CAN + Direct UDP + ESP-NOW):**
+   * **Primary:** TWAI CAN Bus (500 kbps) transmitting telemetry frames `0x355`, `0x356`, `0x358`, `0x359-0x35C`.
+   * **Secondary:** Direct UDP point-to-point packet streaming over Wi-Fi.
+   * **Tertiary (Zero-Dependency Failover):** Direct peer-to-peer ESP-NOW broadcast (`EspNowBmsPacket` and `EspNowPack8Packet`) with CRC checksum. Operates independently even if the home router or Wi-Fi AP reboots. If CAN frames stall for >2000ms, ESP-NOW seamlessly takes over telemetry injection to prevent inverter timeouts.
+
+5. **EyBond Wi-Fi Datalogger VIP Transparent Bridge (Port 502):**
    * Resolves the vendor lock-in of EyBond/SmartESS Wi-Fi data loggers.
    * Discovered the true EyBond server endpoint is **TCP Port 502** (`vip1.eybond.com:502`), not port 18899 (which is an AT cellular terminal that drops connections after 15 seconds).
    * Proxies binary Modbus frames to the cloud so the **official SmartESS mobile app remains 100% functional** while Home Assistant intercepts telemetry locally at 2.5s intervals.
    * **Guarded UDP Watchdog:** Sends zero-configuration LAN signals (`set>server=<HA_IP>:8899;\r\n` to port 58899) to recover the logger within 1.5 seconds if the home router reboots at 04:00 AM. **Requires zero router modification, zero DNS spoofing, and no OpenWrt/pfSense.**
 
-4. **Real-Time Battery Load Sharing Lovelace Dashboard:**
+6. **Real-Time Battery Load Sharing Lovelace Dashboard:**
    * High-density Home Assistant UI featuring live power flow, dynamic pack current ranking, cell drift analysis, and exact Thai PEA TOU tiered electricity cost calculations.
 
 ---

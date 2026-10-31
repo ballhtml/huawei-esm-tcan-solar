@@ -1,6 +1,11 @@
 # ==============================================================================
 # ESPHome Configuration for Board 2: LILYGO T-CAN485 (Inverter Bridge & Logger)
-# Version: 1.1.0 (Cell-Spike Protection + 8-Pack Real-Time Web Table)
+# Version: 1.2.0 (Absorption Voltage Clamping + ESP-NOW Tri-Redundant Link)
+# Changelog:
+#   - v1.2.0: Added Absorption Voltage Clamping (CV Clamping at 53.4V on cell >3.50V)
+#             Added Tri-Redundant ESP-NOW Hot-Failover Link (<2000ms stale CAN detection)
+#             Added Pack 8 ESP-NOW summary broadcast with 15-cell telemetry
+#   - v1.1.0: Cell-Spike Protection + 8-Pack Real-Time Web Table
 # ==============================================================================
 
 esphome:
@@ -57,8 +62,8 @@ esp32:
         - sdmmc
 
 wifi:
-  ssid: "Home_Ball"
-  password: "99999999"
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
   manual_ip:
     static_ip: 192.168.8.109
     gateway: 192.168.8.1
