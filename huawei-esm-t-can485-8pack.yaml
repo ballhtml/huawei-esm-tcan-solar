@@ -59,8 +59,8 @@ esp32:
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 wifi:
-  ssid: "YOUR_WIFI_SSID"
-  password: "YOUR_WIFI_PASSWORD"
+  ssid: "Home_Ball"
+  password: "99999999"
   manual_ip:
     static_ip: 192.168.8.108
     gateway: 192.168.8.1
@@ -298,9 +298,26 @@ interval:
           };
 
           // Evaluate live fresh packs and find both True Bank Averages & Worst-Pack Safety Floors
+          // ESP-NOW Failover for Pack 8 if CAN 0x358 is stale
+          if (!is_pack_fresh(7, 3000) && (millis() - g_last_espnow_p8_rx_ms < 3000)) {
+            if (g_espnow_p8_rx.is_online) {
+              float p8_v = (float)g_espnow_p8_rx.voltage_x100 * 0.01f;
+              float p8_i = (float)g_espnow_p8_rx.current_x10 * 0.1f;
+              float p8_soc = (float)g_espnow_p8_rx.soc_x10 * 0.1f;
+              float p8_temp = (float)g_espnow_p8_rx.temp_x10 * 0.1f;
+              mark_pack_rx_fresh(7);
+              id(pack8_battery_voltage).publish_state(p8_v);
+              id(pack8_busbar_voltage).publish_state(p8_v);
+              id(pack8_current).publish_state(p8_i);
+              id(pack8_state_of_charge).publish_state(p8_soc);
+              id(pack8_max_cell_temp).publish_state(p8_temp);
+            }
+          }
+
           float min_soc = 100.0f;
           float min_v = 100.0f;
           uint16_t min_cell_mv = 9999;
+          uint16_t max_cell_mv = 0;
           float sum_soc = 0.0f;
           float sum_v = 0.0f;
           int active_soc_packs = 0;
@@ -327,6 +344,7 @@ interval:
               if (std::isfinite(cv) && cv > 1.5f && cv < 4.5f) {
                 uint16_t cmv = (uint16_t)(cv * 1000.0f + 0.5f);
                 if (cmv < min_cell_mv) min_cell_mv = cmv;
+                if (cmv > max_cell_mv) max_cell_mv = cmv;
               }
             }
           }
@@ -403,6 +421,22 @@ interval:
             };
             ::sendto(s_udp_109, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
           }
+
+          // 4. Zero-Latency Direct Wireless Broadcast over ESP-NOW (Tri-Redundant Link)
+          static uint8_t s_espnow_seq = 0;
+          EspNowBmsPacket espnow_pkt = {};
+          espnow_pkt.magic = ESPNOW_BMS_MAGIC;
+          espnow_pkt.seq = s_espnow_seq++;
+          espnow_pkt.online_mask = (uint8_t)active_v_packs;
+          espnow_pkt.sys_soc_x10 = (int16_t)(target_soc * 10.0f);
+          espnow_pkt.sys_soh_x10 = (int16_t)(100.0f * 10.0f);
+          espnow_pkt.sys_v_x100 = v_100;
+          espnow_pkt.sys_i_x10 = i_10;
+          espnow_pkt.max_temp_x10 = t_10;
+          espnow_pkt.min_cell_mv = send_min_cell;
+          espnow_pkt.max_cell_mv = (max_cell_mv < 9000) ? max_cell_mv : 0;
+          espnow_pkt.min_pack_v_x100 = min_v_100;
+          espnow_broadcast_bms_summary(espnow_pkt);
 
           // Direct UDP Telemetry Broadcast to CYD Display (192.168.8.110:5005) & Board 109
           static uint8_t s_seq = 0;

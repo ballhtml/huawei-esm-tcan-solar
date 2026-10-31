@@ -57,8 +57,8 @@ esp32:
         - sdmmc
 
 wifi:
-  ssid: "YOUR_WIFI_SSID"
-  password: "YOUR_WIFI_PASSWORD"
+  ssid: "Home_Ball"
+  password: "99999999"
   manual_ip:
     static_ip: 192.168.8.109
     gateway: 192.168.8.1
@@ -166,6 +166,27 @@ interval:
               twai_start();
             }
           }
+
+          // Seamless Fast Failover: Check ESP-NOW if CAN frames are stale (>2000ms)
+          if ((millis() - esphome::pylontech_emulator::g_last_can_frame_ms > 2000) &&
+              (millis() - g_last_espnow_bms_rx_ms < 3000)) {
+            float v = (float)g_espnow_bms_rx.sys_v_x100 * 0.01f;
+            float i = (float)g_espnow_bms_rx.sys_i_x10 * 0.1f;
+            float soc = (float)g_espnow_bms_rx.sys_soc_x10 * 0.1f;
+            float soh = (float)g_espnow_bms_rx.sys_soh_x10 * 0.1f;
+            float t = (float)g_espnow_bms_rx.max_temp_x10 * 0.1f;
+            if (soc > 0 && soc <= 100 && v > 20.0f && v < 65.0f) {
+              g_reported_min_pack_v = (float)g_espnow_bms_rx.min_pack_v_x100 * 0.01f;
+              g_reported_min_cell_mv = g_espnow_bms_rx.min_cell_mv;
+              id(can_battery_soc).publish_state(soc);
+              id(can_battery_soh).publish_state(soh);
+              id(can_battery_voltage).publish_state(v);
+              id(can_battery_current).publish_state(i);
+              id(can_battery_temp).publish_state(t);
+              id(can_battery_power).publish_state(v * i);
+              id(pylon_emu).ping_telemetry();
+            }
+          }
           static int udp_sock = -1;
           if (udp_sock < 0) {
             udp_sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
@@ -229,6 +250,7 @@ interval:
           float pi8 = id(pack8_current).state;
           float psoc8 = id(pack8_soc).state;
           float pt8 = id(pack8_max_cell_temp).state;
+          uint16_t p8_cmin = 0, p8_cmax = 0;
           if (is_pack_fresh(7, 30000) && std::isfinite(pv8) && pv8 > 20.0f) {
             g_tcan_direct_pkt.packs[7].is_online = 1;
             g_tcan_direct_pkt.packs[7].voltage_x100 = (int16_t)(pv8 * 100.0f);
@@ -248,6 +270,8 @@ interval:
               }
             }
             if (valid_c >= 10) {
+              p8_cmin = cmin;
+              p8_cmax = cmax;
               g_tcan_direct_pkt.packs[7].delta_mv = (int16_t)(cmax - cmin);
             }
           } else {
@@ -295,6 +319,18 @@ interval:
                   (uint8_t)(t_10 & 0xFF), (uint8_t)((t_10 >> 8) & 0xFF)
                 };
                 id(interconnect_can_bus).send_data(0x358, false, d358);
+
+                // Broadcast Pack 8 Summary over ESP-NOW to Board 108
+                EspNowPack8Packet p8_pkt = {};
+                p8_pkt.magic = ESPNOW_P8_MAGIC;
+                p8_pkt.is_online = 1;
+                p8_pkt.voltage_x100 = (int16_t)v_100;
+                p8_pkt.current_x10 = (int16_t)(pi * 10.0f);
+                p8_pkt.soc_x10 = (int16_t)(psoc * 10.0f);
+                p8_pkt.temp_x10 = t_10;
+                p8_pkt.min_cell_mv = p8_cmin;
+                p8_pkt.max_cell_mv = p8_cmax;
+                espnow_broadcast_pack8_summary(p8_pkt);
               }
             } else {
               // step 1..4 -> CAN ID 0x359..0x35C (4 cells per frame in mV, last slot of 0x35C = min_temp_x10)

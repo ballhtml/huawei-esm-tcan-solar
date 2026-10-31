@@ -5,6 +5,10 @@
 #include <lwip/sockets.h>
 #include <fcntl.h>
 #include "esphome/core/hal.h"
+#if defined(ESP32) || defined(USE_ESP32)
+#include <esp_now.h>
+#include <esp_wifi.h>
+#endif
 
 #define TCAN_TELEMETRY_PORT 5005
 #define TCAN_MAGIC 0x5443
@@ -218,5 +222,125 @@ inline float g_li2_discharge_limit_a = 120.0f;
 inline uint16_t g_li2_min_cell_mv = 0;
 inline uint16_t g_li2_max_cell_mv = 0;
 inline float g_li2_min_pack_v = 0.0f;
+
+// -----------------------------------------------------------------------------
+// ESP-NOW Zero-Latency Direct Wireless Link (Tri-Redundant Failover)
+// -----------------------------------------------------------------------------
+#define ESPNOW_BMS_MAGIC 0x454E // 'EN' (BMS Summary Packet)
+#define ESPNOW_P8_MAGIC  0x5038 // 'P8' (Pack 8 Telemetry Packet)
+
+#pragma pack(push, 1)
+struct EspNowBmsPacket {
+  uint16_t magic;           // 0x454E
+  uint8_t  seq;             // rolling sequence
+  uint8_t  online_mask;     // Bit 0..7 for Pack 1..8
+  int16_t  sys_soc_x10;     // Total SOC x10 (e.g. 850 = 85.0%)
+  int16_t  sys_soh_x10;     // Total SOH x10 (e.g. 1000 = 100.0%)
+  int16_t  sys_v_x100;      // Total Voltage x100 (e.g. 5325 = 53.25V)
+  int16_t  sys_i_x10;       // Total Current x10 (e.g. -200 = -20.0A)
+  int16_t  max_temp_x10;    // Max Temp x10 (e.g. 285 = 28.5C)
+  uint16_t min_cell_mv;     // Weakest cell mV (e.g. 3320)
+  uint16_t max_cell_mv;     // Strongest cell mV (e.g. 3345)
+  uint16_t min_pack_v_x100; // Weakest pack V x100 (e.g. 5310 = 53.10V)
+  uint16_t checksum;        // Sum of all previous bytes
+};
+
+struct EspNowPack8Packet {
+  uint16_t magic;           // 0x5038
+  uint8_t  seq;
+  uint8_t  is_online;
+  int16_t  voltage_x100;
+  int16_t  current_x10;
+  int16_t  soc_x10;
+  int16_t  temp_x10;
+  uint16_t min_cell_mv;
+  uint16_t max_cell_mv;
+  uint16_t checksum;
+};
+#pragma pack(pop)
+
+inline uint16_t calc_bms_checksum(const EspNowBmsPacket &pkt) {
+  const uint8_t *p = (const uint8_t *)&pkt;
+  uint16_t sum = 0;
+  for (size_t i = 0; i < sizeof(EspNowBmsPacket) - 2; i++) {
+    sum += p[i];
+  }
+  return sum;
+}
+
+inline uint16_t calc_p8_checksum(const EspNowPack8Packet &pkt) {
+  const uint8_t *p = (const uint8_t *)&pkt;
+  uint16_t sum = 0;
+  for (size_t i = 0; i < sizeof(EspNowPack8Packet) - 2; i++) {
+    sum += p[i];
+  }
+  return sum;
+}
+
+#if defined(ESP32) || defined(USE_ESP32)
+inline uint32_t g_last_espnow_bms_rx_ms = 0;
+inline EspNowBmsPacket g_espnow_bms_rx = {};
+
+inline uint32_t g_last_espnow_p8_rx_ms = 0;
+inline EspNowPack8Packet g_espnow_p8_rx = {};
+
+inline void on_espnow_shared_recv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
+  if (data == nullptr || len <= 0) return;
+  if (len == sizeof(EspNowBmsPacket)) {
+    const EspNowBmsPacket *pkt = (const EspNowBmsPacket *)data;
+    if (pkt->magic == ESPNOW_BMS_MAGIC) {
+      if (pkt->checksum == calc_bms_checksum(*pkt)) {
+        g_espnow_bms_rx = *pkt;
+        g_last_espnow_bms_rx_ms = esphome::millis();
+      }
+    }
+  } else if (len == sizeof(EspNowPack8Packet)) {
+    const EspNowPack8Packet *pkt = (const EspNowPack8Packet *)data;
+    if (pkt->magic == ESPNOW_P8_MAGIC) {
+      if (pkt->checksum == calc_p8_checksum(*pkt)) {
+        g_espnow_p8_rx = *pkt;
+        g_last_espnow_p8_rx_ms = esphome::millis();
+      }
+    }
+  }
+}
+
+inline bool init_espnow_shared_link() {
+  static bool s_espnow_ready = false;
+  if (s_espnow_ready) return true;
+
+  esp_err_t err = esp_now_init();
+  if (err != ESP_OK) {
+    return false;
+  }
+
+  esp_now_register_recv_cb(on_espnow_shared_recv);
+
+  static const uint8_t bc_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, bc_mac, 6);
+  peer.channel = 0;
+  peer.ifidx = WIFI_IF_STA;
+  peer.encrypt = false;
+  esp_now_add_peer(&peer);
+
+  s_espnow_ready = true;
+  return true;
+}
+
+inline void espnow_broadcast_bms_summary(EspNowBmsPacket &pkt) {
+  if (!init_espnow_shared_link()) return;
+  pkt.checksum = calc_bms_checksum(pkt);
+  static const uint8_t bc_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  esp_now_send(bc_mac, (const uint8_t *)&pkt, sizeof(pkt));
+}
+
+inline void espnow_broadcast_pack8_summary(EspNowPack8Packet &pkt) {
+  if (!init_espnow_shared_link()) return;
+  pkt.checksum = calc_p8_checksum(pkt);
+  static const uint8_t bc_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  esp_now_send(bc_mac, (const uint8_t *)&pkt, sizeof(pkt));
+}
+#endif
 
 

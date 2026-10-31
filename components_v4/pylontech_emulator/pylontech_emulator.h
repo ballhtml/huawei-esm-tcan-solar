@@ -307,24 +307,24 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     if (max_cell >= 3600) {
       target_limit = 0;    // 0.0A (Immediate stop before Huawei BMS 3.65V OVP trip)
       ESP_LOGW(TAG, "CELL SPIKE CRITICAL: Max cell %u mV >= 3600 mV -> Charge stopped (0.0A)", max_cell);
-    } else if (max_cell >= 3550) {
-      target_limit = std::min(target_limit, (uint16_t)60);  // 6.0A balance trickle
-      ESP_LOGW(TAG, "CELL SPIKE 3.55V: Max cell %u mV -> Throttled to 6.0A", max_cell);
-    } else if (max_cell >= 3500) {
-      target_limit = std::min(target_limit, (uint16_t)150); // 15.0A
-      ESP_LOGI(TAG, "CELL SPIKE 3.50V: Max cell %u mV -> Throttled to 15.0A", max_cell);
-    } else if (max_cell >= 3460) {
-      target_limit = std::min(target_limit, (uint16_t)300); // 30.0A
-    } else if (max_cell >= 3420) {
-      target_limit = std::min(target_limit, (uint16_t)600); // 60.0A
+    } else if (max_cell >= 3560) {
+      target_limit = std::min(target_limit, (uint16_t)250); // 25.0A balance trickle
+      ESP_LOGW(TAG, "CELL SPIKE 3.56V: Max cell %u mV -> Throttled to 25.0A", max_cell);
+    } else if (max_cell >= 3520) {
+      target_limit = std::min(target_limit, (uint16_t)500); // 50.0A moderate absorption
+      ESP_LOGI(TAG, "CELL SPIKE 3.52V: Max cell %u mV -> Throttled to 50.0A", max_cell);
+    } else if (max_cell >= 3480) {
+      target_limit = std::min(target_limit, (uint16_t)800); // 80.0A (allows other packs to draw healthy current while voltage is clamped!)
+    } else if (max_cell >= 3440) {
+      target_limit = std::min(target_limit, (uint16_t)1100); // 110.0A
     }
 
     // Stage 3: Cell Imbalance Throttling (give passive balancers time when delta is high)
-    if (v >= 52.5f && cell_delta_mv >= 80 && max_cell >= 3400) {
-      target_limit = std::min(target_limit, (uint16_t)200); // 20.0A
-      ESP_LOGI(TAG, "CELL DELTA HIGH: %u mV imbalance -> Throttled to 20.0A for balancing", cell_delta_mv);
-    } else if (v >= 52.0f && cell_delta_mv >= 50 && max_cell >= 3400) {
-      target_limit = std::min(target_limit, (uint16_t)400); // 40.0A
+    if (v >= 52.5f && cell_delta_mv >= 100 && max_cell >= 3450) {
+      target_limit = std::min(target_limit, (uint16_t)350); // 35.0A
+      ESP_LOGI(TAG, "CELL DELTA HIGH: %u mV imbalance -> Throttled to 35.0A for balancing", cell_delta_mv);
+    } else if (v >= 52.0f && cell_delta_mv >= 60 && max_cell >= 3450) {
+      target_limit = std::min(target_limit, (uint16_t)600); // 60.0A
     }
 
     // Stage 3b: Pack Current Imbalance Throttling (protects pack taking excessive unequal current)
@@ -395,18 +395,18 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       }
     } else if (max_cell >= 3600) {
       g_li2_throttling_reason = "CELL_SPIKE_3.60V (0A)";
-    } else if (max_cell >= 3550) {
-      g_li2_throttling_reason = "CELL_TRICKLE_3.55V (6A)";
-    } else if (max_cell >= 3500) {
-      g_li2_throttling_reason = "CELL_KNEE_3.50V (15A)";
-    } else if (max_cell >= 3460) {
-      g_li2_throttling_reason = "CELL_KNEE_3.46V (30A)";
-    } else if (max_cell >= 3420) {
-      g_li2_throttling_reason = "CELL_KNEE_3.42V (60A)";
-    } else if (v >= 52.5f && cell_delta_mv >= 80 && max_cell >= 3400) {
-      g_li2_throttling_reason = "CELL_DELTA_IMBALANCE (20A)";
-    } else if (v >= 52.0f && cell_delta_mv >= 50 && max_cell >= 3400) {
-      g_li2_throttling_reason = "CELL_DELTA_MODERATE (40A)";
+    } else if (max_cell >= 3560) {
+      g_li2_throttling_reason = "CELL_TRICKLE_3.56V (25A)";
+    } else if (max_cell >= 3520) {
+      g_li2_throttling_reason = "ABSORPTION_CLAMP_3.52V (50A)";
+    } else if (max_cell >= 3480) {
+      g_li2_throttling_reason = "ABSORPTION_CLAMP_3.48V (80A)";
+    } else if (max_cell >= 3440) {
+      g_li2_throttling_reason = "BULK_TAPER_3.44V (110A)";
+    } else if (v >= 52.5f && cell_delta_mv >= 100 && max_cell >= 3450) {
+      g_li2_throttling_reason = "CELL_DELTA_IMBALANCE (35A)";
+    } else if (v >= 52.0f && cell_delta_mv >= 60 && max_cell >= 3450) {
+      g_li2_throttling_reason = "CELL_DELTA_MODERATE (60A)";
     } else if (temp >= 50.0f) {
       g_li2_throttling_reason = "HIGH_TEMP_DERATE (20A)";
     } else if (temp >= 46.0f) {
@@ -821,17 +821,21 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     return "00000000";
   }
 
-  // Dynamic Charge Voltage Limit (mitpylon Float Step-Down)
+  // Dynamic Charge Voltage Limit (Absorption Voltage Clamping)
   uint16_t get_dynamic_charge_voltage_mv() {
     float soc = get_soc();
     uint16_t max_cell = get_max_cell_voltage_mv();
-    
+
     uint16_t target_mv = 53800; // 53.8V (~3.58V/cell bulk fast charge)
-    // Float stage: when max cell >= 3480 mV or SOC >= 98%
+    // Absorption Voltage Clamping:
+    // When any cell hits 3500mV, clamp busbar voltage to 53.4V (3.56V/cell max)
+    // Full pack naturally tapers to 0A while starving packs keep charging!
     if (max_cell >= 3550 || soc >= 99.0f) {
       target_mv = 53000; // 53.0V (~3.53V/cell float holding - zero cell stress)
-    } else if (max_cell >= 3480 || soc >= 98.0f) {
+    } else if (max_cell >= 3520 || soc >= 98.0f) {
       target_mv = 53200; // 53.2V (~3.54V/cell absorption float)
+    } else if (max_cell >= 3500) {
+      target_mv = 53400; // 53.4V (~3.56V/cell absorption clamp)
     }
     g_li2_target_charge_v = (float)target_mv * 0.001f;
     return target_mv;
