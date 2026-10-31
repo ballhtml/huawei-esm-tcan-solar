@@ -242,23 +242,66 @@ class EM11000SelectBridge:
             self.hass.states.async_set, "sensor.home_energy_em11000_bridge_status", status, attrs
         )
 
-    def _do_local_triage_query(self, plug_sock: socket.socket) -> bool:
+    def _query_modbus_block(
+        self,
+        plug_sock: socket.socket,
+        cmd: bytes,
+        expected_min_len: int,
+        cloud_sock: socket.socket | None = None,
+    ) -> bytes | None:
+        """Send Modbus query via EyBond envelope, correlate TID, forward foreign frames to cloud, and verify Modbus CRC16."""
+        self.tid = (self.tid + 1) & 0xFFFF
+        hdr = struct.pack('>HHHBB', self.tid, self.rx_devcode, 8 + len(cmd) - 6, 1, 4)
+        try:
+            plug_sock.sendall(hdr + cmd)
+        except Exception:
+            return None
+
+        deadline = time.time() + 0.35
+        while time.time() < deadline:
+            remaining = max(0.02, deadline - time.time())
+            r, _, _ = select.select([plug_sock], [], [], remaining)
+            if not r:
+                return None
+            try:
+                resp = plug_sock.recv(2048)
+            except Exception:
+                return None
+            if not resp or len(resp) < 8:
+                return None
+
+            rx_tid, _, _, _, rx_fc = struct.unpack('>HHHBB', resp[:8])
+            # If TID does not match our query, it belongs to a cloud transaction! Forward to cloud!
+            if rx_tid != self.tid:
+                if cloud_sock is not None:
+                    try:
+                        cloud_sock.sendall(resp)
+                    except Exception:
+                        pass
+                continue
+
+            # Check minimum length and Modbus Read Holding Registers response FC 3
+            if len(resp) < expected_min_len or len(resp) < 10 or resp[9] != 3:
+                return None
+
+            # Verify Modbus RTU CRC16 (Payload starts at resp[8:])
+            mb_payload = resp[8:]
+            if len(mb_payload) >= 4:
+                calc_crc = crc16(mb_payload[:-2])
+                rx_crc = mb_payload[-2:]
+                if calc_crc != rx_crc:
+                    return None
+
+            return resp
+        return None
+
+    def _do_local_triage_query(self, plug_sock: socket.socket, cloud_sock: socket.socket | None = None) -> bool:
         """Send high-speed local Modbus queries (Block D+PV1, PV2, Batt) to extract live telemetry in ~45ms."""
         try:
             # 1. Query Block D & PV1: Reg 338 to 353 (16 registers)
-            # 338: Grid V, 346: AC Output V, 347: AC Current, 348: Output Active Power,
-            # 350: Load %, 351: PV1 Voltage, 352: PV1 Current, 353: PV1 Power
-            self.tid = (self.tid + 1) & 0xFFFF
             cmd_d = build_modbus_read(1, 338, 16)
-            hdr_d = struct.pack('>HHHBB', self.tid, self.rx_devcode, 8 + len(cmd_d) - 6, 1, 4)
-            plug_sock.sendall(hdr_d + cmd_d)
-
-            # Wait for response with 0.35s timeout
-            r_d, _, _ = select.select([plug_sock], [], [], 0.35)
-            if not r_d:
-                return False
-            resp_d = plug_sock.recv(1024)
-            if not resp_d or len(resp_d) < 43 or resp_d[9] != 3:
+            resp_d = self._query_modbus_block(plug_sock, cmd_d, 43, cloud_sock)
+            if not resp_d:
                 return False
 
             mb_d = resp_d[8:]
@@ -273,17 +316,9 @@ class EM11000SelectBridge:
             p_pv1 = float(struct.unpack('>H', mb_d[33:35])[0])
 
             # 2. Query Block PV2: Reg 389 to 391 (3 registers)
-            # 389: PV2 Voltage, 390: PV2 Current, 391: PV2 Power
-            self.tid = (self.tid + 1) & 0xFFFF
             cmd_pv2 = build_modbus_read(1, 389, 3)
-            hdr_pv2 = struct.pack('>HHHBB', self.tid, self.rx_devcode, 8 + len(cmd_pv2) - 6, 1, 4)
-            plug_sock.sendall(hdr_pv2 + cmd_pv2)
-
-            r_pv2, _, _ = select.select([plug_sock], [], [], 0.35)
-            if not r_pv2:
-                return False
-            resp_pv2 = plug_sock.recv(1024)
-            if not resp_pv2 or len(resp_pv2) < 17 or resp_pv2[9] != 3:
+            resp_pv2 = self._query_modbus_block(plug_sock, cmd_pv2, 17, cloud_sock)
+            if not resp_pv2:
                 return False
 
             mb_pv2 = resp_pv2[8:]
@@ -292,17 +327,9 @@ class EM11000SelectBridge:
             p_pv2 = float(struct.unpack('>H', mb_pv2[7:9])[0])
 
             # 3. Query Block B: Reg 277 to 281 (5 registers)
-            # 277: Batt V, 278: Batt I, 279: Batt Power, 280: DC Temp, 281: Batt SOC
-            self.tid = (self.tid + 1) & 0xFFFF
             cmd_b = build_modbus_read(1, 277, 5)
-            hdr_b = struct.pack('>HHHBB', self.tid, self.rx_devcode, 8 + len(cmd_b) - 6, 1, 4)
-            plug_sock.sendall(hdr_b + cmd_b)
-
-            r_b, _, _ = select.select([plug_sock], [], [], 0.35)
-            if not r_b:
-                return False
-            resp_b = plug_sock.recv(1024)
-            if not resp_b or len(resp_b) < 21 or resp_b[9] != 3:
+            resp_b = self._query_modbus_block(plug_sock, cmd_b, 21, cloud_sock)
+            if not resp_b:
                 return False
 
             mb_b = resp_b[8:]
@@ -443,6 +470,7 @@ class EM11000SelectBridge:
 
             last_status_log = time.time()
             last_triage_poll = 0.0
+            last_cloud_reconnect_attempt = time.time()
             pkt_plug = 0
             pkt_cloud = 0
 
@@ -451,14 +479,24 @@ class EM11000SelectBridge:
                 try:
                     now = time.time()
 
+                    # Cloud socket auto-recovery: reconnect upstream if disconnected
+                    if cloud_sock is None and (now - last_cloud_reconnect_attempt >= 5.0):
+                        last_cloud_reconnect_attempt = now
+                        try:
+                            cs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            cs.settimeout(3.0)
+                            cs.connect((self.cloud_ip, self.cloud_port))
+                            cs.setblocking(False)
+                            cloud_sock = cs
+                            audit_log(f"[UPSTREAM] Reconnected upstream to VIP Cloud {self.cloud_ip}:{self.cloud_port} successfully!")
+                        except Exception:
+                            cloud_sock = None
+
                     # 1. Triage Screening: Poll local metrics every 3.0 seconds!
                     if now - last_triage_poll >= 3.0:
                         last_triage_poll = now
-                        plug_sock.settimeout(0.5)
-                        triage_ok = self._do_local_triage_query(plug_sock)
-                        plug_sock.setblocking(False)
+                        triage_ok = self._do_local_triage_query(plug_sock, cloud_sock)
                         if not triage_ok:
-                            # If socket broken during triage, reconnect
                             pass
 
                     # 2. Multiplexing select: Check for Cloud requests & unsolicited Plug frames
@@ -514,6 +552,7 @@ class EM11000SelectBridge:
                             try: cloud_sock.close()
                             except Exception: pass
                             cloud_sock = None
+                            last_cloud_reconnect_attempt = time.time()
                             continue
 
                         try:
