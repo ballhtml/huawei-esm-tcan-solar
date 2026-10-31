@@ -69,14 +69,15 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
                                                                       │ Local LAN TCP :8899
                                                                       ▼
                                                    ┌─────────────────────────────────────┐
-                                                   │ Home Assistant VIP Bridge (.209)    │
-                                                   │ - Zero-latency Local Sensors (2.5s) │
+                                                   │ Home Assistant Triage Bridge (v2.0) │
+                                                   │ - 3.0s Live Dual-MPPT Triage (0ms)  │
+                                                   │ - PV1 & PV2 Independent Telemetry   │
                                                    │ - Guarded UDP Auto-Recovery Watchdog│
                                                    └──────────────────┬──────────────────┘
-                                                                      │ Upstream TCP :502
+                                                                      │ Upstream TCP :18899
                                                                       ▼
                                                    ┌─────────────────────────────────────┐
-                                                   │ China VIP Cloud (47.239.230.129:502)│
+                                                   │ China VIP Cloud (vip1.eybond.com)   │
                                                    │ (SmartESS / DessMonitor App 100% OK)│
                                                    └─────────────────────────────────────┘
 ```
@@ -104,13 +105,15 @@ esphome compile huawei-esm-t-can485-8pack.yaml
 esphome upload huawei-esm-t-can485-8pack.yaml --device <DEVICE_IP>
 ```
 
-### 2. Deploy EyBond VIP Cloud Bridge on Home Assistant
+### 2. Deploy EyBond VIP Cloud Bridge on Home Assistant (v2.0.0)
 Copy the `custom_components/em11000_bridge` directory to your Home Assistant `/config/custom_components/`:
 ```bash
 # Add to configuration.yaml
 em11000_bridge:
 ```
-Restart Home Assistant. The bridge will listen on port `8899`, intercept local telemetry, maintain the upstream link to `vip1.eybond.com:502`, and auto-recover the plug if your router reboots.
+Restart Home Assistant. The bridge will listen on port `8899`, inject 3.0s local Modbus triage (true Dual-MPPT PV1 & PV2), forward to `dess_solar` coordinator, maintain the upstream multiplexing link to `vip1.eybond.com:18899`, and auto-recover the plug if your router reboots.
+
+For the full architectural breakdown, register map, and setup guide, see [docs/SMARTESS_EYBOND_LOCAL_TRIAGE_BRIDGE_GUIDE.md](docs/SMARTESS_EYBOND_LOCAL_TRIAGE_BRIDGE_GUIDE.md).
 
 ### 3. Verify Live Telemetry
 Open Home Assistant -> **Developer Tools** -> **States**:

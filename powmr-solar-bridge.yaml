@@ -1,0 +1,174 @@
+substitutions:
+  name: "powmr-solar-bridge"
+  friendly_name: "PowMr Inverter Solar Bridge"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  build_path: C:\esphome_build\powmr-solar-bridge
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# ------------------------------------------------------------------------------
+# Network & Native Home Assistant API
+# Dynamic DHCP (No fixed IP conflicts), Fallback AP, and Web Server
+# ------------------------------------------------------------------------------
+wifi:
+  # Captive Portal Setup (No hardcoded SSID - plug & play for any house)
+  # When powered on, broadcasts an open Wi-Fi hotspot 'PowMr-Solar-Setup'
+  # Connect with phone -> auto-popup captive portal -> select Wi-Fi & enter password -> Saved!
+  ap:
+    ssid: "PowMr-Solar-Setup"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+  baud_rate: 0  # Disable serial logging to keep UART dedicated to Inverter
+
+# ------------------------------------------------------------------------------
+# Hardware UART Configuration for MAX3232 Transceiver
+# GPIO16 = ESP RX (Connects to MAX3232 TXD)
+# GPIO17 = ESP TX (Connects to MAX3232 RXD)
+# PowMr HVM 10.2M & 11KP use standard 2400 baud 8N1 Voltronic PI30 protocol
+# ------------------------------------------------------------------------------
+uart:
+  - id: uart_rs232
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+    baud_rate: 2400
+    stop_bits: 1
+
+# ------------------------------------------------------------------------------
+# Voltronic PI30 Native Inverter Protocol Engine
+# ------------------------------------------------------------------------------
+pipsolar:
+  - id: powmr_inverter
+    uart_id: uart_rs232
+    update_interval: 2s
+
+# ------------------------------------------------------------------------------
+# Real-Time Sensor Telemetry for Home Assistant
+# ------------------------------------------------------------------------------
+sensor:
+  # Solar PV Metrics
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    pv_charging_power:
+      name: "PowMr Solar PV Power"
+      unit_of_measurement: "W"
+      device_class: "power"
+      state_class: "measurement"
+      icon: "mdi:solar-power"
+    pv_input_voltage:
+      name: "PowMr Solar PV Voltage"
+      unit_of_measurement: "V"
+      device_class: "voltage"
+      icon: "mdi:solar-panel"
+    pv_input_current_for_battery:
+      name: "PowMr Solar PV Current"
+      unit_of_measurement: "A"
+      device_class: "current"
+
+  # AC Grid (Utility)
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    grid_voltage:
+      name: "PowMr Grid AC Voltage"
+      unit_of_measurement: "V"
+      device_class: "voltage"
+      icon: "mdi:transmission-tower"
+    grid_frequency:
+      name: "PowMr Grid AC Frequency"
+      unit_of_measurement: "Hz"
+      device_class: "frequency"
+
+  # Home AC Load Output
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    ac_output_active_power:
+      name: "PowMr Home Load Power"
+      unit_of_measurement: "W"
+      device_class: "power"
+      state_class: "measurement"
+      icon: "mdi:home-lightning-bolt"
+    ac_output_voltage:
+      name: "PowMr AC Output Voltage"
+      unit_of_measurement: "V"
+      device_class: "voltage"
+    ac_output_frequency:
+      name: "PowMr AC Output Frequency"
+      unit_of_measurement: "Hz"
+      device_class: "frequency"
+    output_load_percent:
+      name: "PowMr Output Load Percent"
+      unit_of_measurement: "%"
+      icon: "mdi:gauge"
+
+  # Battery Telemetry
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    battery_voltage:
+      name: "PowMr Battery Voltage"
+      unit_of_measurement: "V"
+      device_class: "voltage"
+      icon: "mdi:battery"
+    battery_charging_current:
+      name: "PowMr Battery Charge Current"
+      unit_of_measurement: "A"
+      device_class: "current"
+      icon: "mdi:battery-charging"
+    battery_discharge_current:
+      name: "PowMr Battery Discharge Current"
+      unit_of_measurement: "A"
+      device_class: "current"
+      icon: "mdi:battery-arrow-down"
+    battery_capacity_percent:
+      name: "PowMr Battery Capacity"
+      unit_of_measurement: "%"
+      device_class: "battery"
+      icon: "mdi:battery-heart-variant"
+
+  # Hardware Diagnostics
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    inverter_heat_sink_temperature:
+      name: "PowMr Heatsink Temperature"
+      unit_of_measurement: "°C"
+      device_class: "temperature"
+      icon: "mdi:thermometer"
+
+# ------------------------------------------------------------------------------
+# Inverter State & Operating Modes
+# ------------------------------------------------------------------------------
+text_sensor:
+  - platform: pipsolar
+    pipsolar_id: powmr_inverter
+    device_mode:
+      name: "PowMr Inverter Mode"
+      icon: "mdi:state-machine"
+
+  - platform: wifi_info
+    ip_address:
+      name: "PowMr Bridge IP Address"
+    ssid:
+      name: "PowMr Connected SSID"
+    mac_address:
+      name: "PowMr Bridge MAC Address"
+
+# Status LED & Reboot Button
+button:
+  - platform: restart
+    name: "PowMr Bridge Restart"

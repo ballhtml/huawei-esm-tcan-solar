@@ -65,7 +65,7 @@ modbus2mqtt-main/
 cyd_hybrid_display/
 scripts/
 codex/
-dess_solar/
+# dess_solar/
 ha_packages/
 
 # Scratch & Logs

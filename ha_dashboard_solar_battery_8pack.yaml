@@ -38,6 +38,16 @@ views:
         content: ออนไลน์ {{ states('sensor.battery_system_active_packs_count') }}/8
           แพ็ก (ΔV {{ states('sensor.battery_system_voltage_delta') }}V)
       - type: template
+        icon: mdi:swap-horizontal-bold
+        icon_color: '{{ ''green'' if states(''sensor.home_energy_inverter_bridge_logger_inverter_queries_count'')|float(0)
+          > 0 else ''red'' }}'
+        content: '{% set q = states(''sensor.home_energy_inverter_bridge_logger_inverter_queries_count'')|float(0)
+          %}{% if q > 0 %}Inverter CAN: {{ ''{:,.0f}''.format(q) }} Q{% else %}Inverter
+          CAN: Offline{% endif %}'
+        tap_action:
+          action: more-info
+          entity: sensor.home_energy_inverter_bridge_logger_inverter_queries_count
+      - type: template
         icon: mdi:battery-charging-high
         icon_color: blue
         content: พร้อมจ่าย {{ states('sensor.battery_usable_energy_to_30_percent_kwh')
@@ -823,7 +833,7 @@ views:
       title: System Controls & Diagnostics
       subtitle: การตั้งค่าโหมดอินเวอร์เตอร์ และลิงก์ดาวน์โหลด Log
     - type: grid
-      columns: 2
+      columns: 3
       square: false
       cards:
       - type: custom:mushroom-template-card
@@ -846,6 +856,18 @@ views:
         tap_action:
           action: navigate
           navigation_path: /home-energy/inverter-setup
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_inverter_bridge_logger_inverter_queries_count
+        primary: Inverter CAN Link
+        secondary: '{% set q = states(''sensor.home_energy_inverter_bridge_logger_inverter_queries_count'')|float(0)
+          %}{% if q > 0 %}Online ({{ ''{:,.0f}''.format(q) }} Q){% else %}Offline{%
+          endif %}'
+        icon: mdi:swap-horizontal-bold
+        icon_color: '{{ ''green'' if states(''sensor.home_energy_inverter_bridge_logger_inverter_queries_count'')|float(0)
+          > 0 else ''red'' }}'
+        tap_action:
+          action: more-info
+          entity: sensor.home_energy_inverter_bridge_logger_inverter_queries_count
     - type: horizontal-stack
       cards:
       - type: custom:mushroom-select-card
