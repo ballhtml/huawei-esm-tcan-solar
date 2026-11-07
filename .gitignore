@@ -118,3 +118,10 @@ syssi-smg-ii.yaml
 firmware.bin
 flash_*.bat
 _backup_production/
+
+# Production hardware configs with live credentials
+*-prod.yaml
+*-production.yaml
+
+!custom_components/**/*.json
+!home_assistant/**

@@ -1,0 +1,368 @@
+"""Device registry for DessMonitor integration.
+
+This module handles registration and lookup of all supported data collector types.
+The devcode refers to the data collector/gateway device, not the inverter itself.
+It explicitly imports supported devcode modules and provides a unified interface.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+# Registry of all supported devcodes
+# This is populated by importing devcode modules below
+_DEVICE_REGISTRY: dict[int, dict[str, Any]] = {}
+
+# Transformations run for every sensor read; report missing support once per run.
+_WARNED_UNSUPPORTED_DEVCODES: set[int] = set()
+
+
+def _register_devcode(devcode: int, config: dict[str, Any]) -> None:
+    """Register a devcode configuration."""
+    _DEVICE_REGISTRY[devcode] = config
+    _LOGGER.debug("Registered devcode %s: %s", devcode, config["device_info"]["name"])
+
+
+def _load_device_configurations() -> None:
+    """Load all device configurations from devcode files."""
+    try:
+        # Import devcode 2361 configuration
+        from .devcode_2361 import DEVCODE_CONFIG as config_2361
+
+        _register_devcode(2361, config_2361)
+
+        # Import devcode 2376 configuration
+        from .devcode_2376 import DEVCODE_CONFIG as config_2376
+
+        _register_devcode(2376, config_2376)
+
+        from .devcode_6416 import DEVCODE_CONFIG as config_6416
+
+        _register_devcode(6416, config_6416)
+
+        from .devcode_6422 import DEVCODE_CONFIG as config_6422
+
+        _register_devcode(6422, config_6422)
+
+        from .devcode_2451 import DEVCODE_CONFIG as config_2451
+
+        _register_devcode(2451, config_2451)
+
+        from .devcode_2449 import DEVCODE_CONFIG as config_2449
+
+        _register_devcode(2449, config_2449)
+
+        from .devcode_2334 import DEVCODE_CONFIG as config_2334
+
+        _register_devcode(2334, config_2334)
+
+        from .devcode_6544 import DEVCODE_CONFIG as config_6544
+
+        _register_devcode(6544, config_6544)
+
+        from .devcode_6514 import DEVCODE_CONFIG as config_6514
+
+        _register_devcode(6514, config_6514)
+
+        from .devcode_6515 import DEVCODE_CONFIG as config_6515
+
+        _register_devcode(6515, config_6515)
+
+        from .devcode_2452 import DEVCODE_CONFIG as config_2452
+
+        _register_devcode(2452, config_2452)
+
+        from .devcode_2428 import DEVCODE_CONFIG as config_2428
+
+        _register_devcode(2428, config_2428)
+
+        from .devcode_2477 import DEVCODE_CONFIG as config_2477
+
+        _register_devcode(2477, config_2477)
+
+        from .devcode_2507 import DEVCODE_CONFIG as config_2507
+
+        _register_devcode(2507, config_2507)
+
+        from .devcode_518 import DEVCODE_CONFIG as config_518
+
+        _register_devcode(518, config_518)
+
+    except ImportError as err:
+        _LOGGER.error("Failed to import device configuration: %s", err)
+
+
+# Load configurations on module import
+_load_device_configurations()
+
+
+def get_devcode_config(devcode: int) -> dict[str, Any] | None:
+    """Get complete configuration for a devcode."""
+    return _DEVICE_REGISTRY.get(devcode)
+
+
+def get_supported_devcodes() -> list[int]:
+    """Get list of all supported data collector codes."""
+    return list(_DEVICE_REGISTRY.keys())
+
+
+def is_devcode_supported(devcode: int) -> bool:
+    """Check if a devcode is supported by the integration."""
+    return devcode in _DEVICE_REGISTRY
+
+
+def get_device_model_name(devcode: int) -> str:
+    """Get human-readable data collector model name for a devcode."""
+    config = get_devcode_config(devcode)
+    if config:
+        return config["device_info"]["name"]
+    return f"Unsupported Device (devcode {devcode})"
+
+
+def map_sensor_title(devcode: int, api_title: str) -> str:
+    """Map API sensor title to standardized display name based on devcode."""
+    config = get_devcode_config(devcode)
+    if not config:
+        _LOGGER.debug(
+            "Unknown devcode %s, using original title: %s", devcode, api_title
+        )
+        return api_title
+
+    # Get title mappings for this devcode
+    title_mappings = config.get("sensor_title_mappings", {})
+
+    # Apply mapping if exists, otherwise use original
+    mapped_title = title_mappings.get(api_title, api_title)
+
+    return mapped_title
+
+
+def map_control_field(devcode: int, api_field_name: str) -> str:
+    """Map API control field name to standardized display name based on devcode."""
+    config = get_devcode_config(devcode)
+    if not config:
+        return api_field_name
+
+    # Get control mappings for this devcode
+    control_mappings = config.get("control_field_mappings", {})
+
+    # Apply mapping if exists, otherwise use original
+    return control_mappings.get(api_field_name, api_field_name)
+
+
+def filter_control_options(
+    devcode: int,
+    param_id: str,
+    options: dict[str, str],
+    data: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Apply a device-specific option filter when its hardware requires one."""
+    config = get_devcode_config(devcode)
+    option_filter = config.get("control_options_filter") if config else None
+    if option_filter is None:
+        return options
+    return option_filter(param_id, options, data)
+
+
+def map_output_priority(devcode: int, api_value: str) -> str:
+    """Map output priority value to human-readable format based on devcode."""
+    config = get_devcode_config(devcode)
+    if not config:
+        return api_value
+
+    priority_mappings = config.get("output_priority_mapping", {})
+    return priority_mappings.get(api_value, api_value)
+
+
+def map_charger_priority(devcode: int, api_value: str) -> str:
+    """Map charger priority value to human-readable format based on devcode."""
+    config = get_devcode_config(devcode)
+    if not config:
+        return api_value
+
+    charger_mappings = config.get("charger_priority_mapping", {})
+    return charger_mappings.get(api_value, api_value)
+
+
+def map_operating_mode(devcode: int, api_value: str) -> str:
+    """Map operating mode value to human-readable format based on devcode."""
+    config = get_devcode_config(devcode)
+    if not config:
+        return api_value
+
+    mode_mappings = config.get("operating_mode_mapping", {})
+    if not isinstance(api_value, str):
+        return api_value
+
+    normalized_value = api_value.strip()
+
+    if normalized_value in mode_mappings:
+        return mode_mappings[normalized_value]
+
+    for candidate, mapped_value in mode_mappings.items():
+        if (
+            isinstance(candidate, str)
+            and candidate.lower().strip() == normalized_value.lower()
+        ):
+            return mapped_value
+
+    return normalized_value
+
+
+def apply_devcode_transformations(
+    devcode: int, sensor_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Apply all devcode-specific transformations to sensor data."""
+    config = get_devcode_config(devcode)
+    if not config:
+        if devcode not in _WARNED_UNSUPPORTED_DEVCODES:
+            _LOGGER.warning(
+                "Unsupported devcode %s - no device-specific mappings available. "
+                "Using raw sensor titles and values; sensor support may be limited. "
+                "To request or add support, share a CLI analysis JSON and your "
+                "inverter model as described at "
+                "https://github.com/andreas-glaser/ha-dessmonitor/blob/dev/"
+                "docs/ADDING_DEVCODES.md#request-support "
+                "(logged once per devcode until Home Assistant restarts)",
+                devcode,
+            )
+            _WARNED_UNSUPPORTED_DEVCODES.add(devcode)
+        return sensor_data
+
+    transformed_data = sensor_data.copy()
+
+    _apply_title_mapping(devcode, transformed_data)
+    _apply_value_mappings(devcode, transformed_data)
+    _apply_custom_transformations(config, transformed_data)
+
+    return transformed_data
+
+
+def _apply_title_mapping(devcode: int, transformed_data: dict[str, Any]) -> None:
+    """Map sensor title to configured alias when available."""
+    if "title" not in transformed_data:
+        return
+
+    original_title = transformed_data["title"]
+    transformed_data["title"] = map_sensor_title(devcode, original_title)
+
+
+def _apply_value_mappings(devcode: int, transformed_data: dict[str, Any]) -> None:
+    """Apply built-in value mappings such as priorities and modes."""
+    title = transformed_data.get("title")
+    value = transformed_data.get("val")
+    if title is None or value is None:
+        return
+
+    normalized = title.lower()
+    if "priority" in normalized and "output" in normalized:
+        transformed_data["val"] = map_output_priority(devcode, str(value))
+    elif "priority" in normalized and "charg" in normalized:
+        transformed_data["val"] = map_charger_priority(devcode, str(value))
+    elif "operating mode" in normalized or normalized.endswith(" mode"):
+        transformed_data["val"] = map_operating_mode(devcode, str(value))
+
+
+def _apply_custom_transformations(
+    config: dict[str, Any], transformed_data: dict[str, Any]
+) -> None:
+    """Apply custom transformation callbacks defined by the devcode config."""
+    title = transformed_data.get("title")
+    if not title:
+        return
+
+    value_transformations = config.get("value_transformations", {})
+    transform_func = value_transformations.get(title)
+    if not transform_func:
+        return
+
+    try:
+        transformed_data["val"] = transform_func(transformed_data.get("val"))
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.warning(
+            "Value transformation failed for %s: %s",
+            title,
+            err,
+        )
+
+
+def get_device_capabilities(devcode: int) -> list[str]:
+    """Get list of supported features for a devcode."""
+    config = get_devcode_config(devcode)
+    if config:
+        return config["device_info"].get("supported_features", [])
+    return []
+
+
+def get_parameter_sensor_names(devcode: int) -> set[str]:
+    """Return the set of parameter names to fetch from queryDeviceParsEs."""
+    config = get_devcode_config(devcode)
+    if config:
+        return config.get("parameter_sensor_names", set())
+    return set()
+
+
+def needs_parameter_fetch(devcode: int) -> bool:
+    """Check whether a devcode requires an extra parameter fetch."""
+    return bool(get_parameter_sensor_names(devcode))
+
+
+def get_all_operating_modes() -> list[str]:
+    """Get all possible operating mode values from base modes and all devcode transformations."""
+    from ..const import OPERATING_MODES
+
+    # Start with base operating modes
+    all_modes = set(OPERATING_MODES)
+
+    # Add transformed values from all registered devcodes
+    for devcode, config in _DEVICE_REGISTRY.items():
+        operating_mode_mapping = config.get("operating_mode_mapping", {})
+        # Add both original API values and transformed values
+        all_modes.update(operating_mode_mapping.keys())
+        all_modes.update(operating_mode_mapping.values())
+
+    return sorted(all_modes)
+
+
+def _get_all_priority_values(base_values: list[str], mapping_name: str) -> list[str]:
+    """Return every known raw and mapped value for a priority sensor."""
+    values = set(base_values)
+    values.add("Unknown")
+    for config in _DEVICE_REGISTRY.values():
+        priority_mapping = config.get(mapping_name, {})
+        values.update(str(value) for value in priority_mapping.keys())
+        values.update(str(value) for value in priority_mapping.values())
+    return sorted(values)
+
+
+def get_all_output_priorities() -> list[str]:
+    """Return every output-priority value known across supported devices."""
+    from ..const import OUTPUT_PRIORITIES
+
+    return _get_all_priority_values(OUTPUT_PRIORITIES, "output_priority_mapping")
+
+
+def get_all_charger_priorities() -> list[str]:
+    """Return every charger-priority value known across supported devices."""
+    from ..const import CHARGER_PRIORITIES
+
+    return _get_all_priority_values(CHARGER_PRIORITIES, "charger_priority_mapping")
+
+
+def get_registry_info() -> dict[str, Any]:
+    """Get information about all registered devices."""
+    return {
+        "supported_devcodes": get_supported_devcodes(),
+        "total_devices": len(_DEVICE_REGISTRY),
+        "devices": {
+            devcode: {
+                "name": config["device_info"]["name"],
+                "description": config["device_info"].get("description", ""),
+                "features": config["device_info"].get("supported_features", []),
+            }
+            for devcode, config in _DEVICE_REGISTRY.items()
+        },
+    }

@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DessMonitor Solar Universal Setup",
+        "description": "Connect to DessMonitor Cloud to monitor and control your Solar Inverter (ANENJI, PowMr, EASUN, etc.).",
+        "data": {
+          "username": "Username / Phone / Email",
+          "password": "Password",
+          "update_interval": "Update Interval",
+          "company_key": "Company Key"
+        },
+        "data_description": {
+          "username": "Account username registered in DessMonitor / SmartESS app",
+          "password": "Account password",
+          "update_interval": "Data refresh polling frequency (default 60 seconds)",
+          "company_key": "Developer / Distributor company key (default: bnrl_frRFjEz8Mkn)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to DessMonitor API. Please check your internet connection.",
+      "invalid_auth": "Invalid username or password. Please verify your credentials.",
+      "unknown": "Unexpected error occurred. Please check Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This DessMonitor account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DessMonitor Solar Options",
+        "description": "Configure polling frequency and telemetry mode.",
+        "data": {
+          "update_interval": "Update Interval",
+          "local_mode": "Telemetry Mode"
+        },
+        "data_description": {
+          "update_interval": "How often to poll telemetry data from the DessMonitor Cloud API.",
+          "local_mode": "Cloud only keeps the official API active while ensuring your mobile app stays connected."
+        }
+      }
+    }
+  }
+}

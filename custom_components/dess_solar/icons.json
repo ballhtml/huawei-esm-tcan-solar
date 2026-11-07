@@ -1,0 +1,36 @@
+{
+  "entity": {
+    "sensor": {
+      "solar_total_power": {
+        "default": "mdi:solar-power"
+      },
+      "pv1_power": {
+        "default": "mdi:solar-power-variant"
+      },
+      "pv2_power": {
+        "default": "mdi:solar-power-variant"
+      },
+      "output_power": {
+        "default": "mdi:flash"
+      },
+      "load_power": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "grid_power": {
+        "default": "mdi:transmission-tower"
+      },
+      "battery_soc": {
+        "default": "mdi:battery-high"
+      },
+      "battery_soh": {
+        "default": "mdi:heart-pulse"
+      },
+      "battery_power": {
+        "default": "mdi:battery-charging"
+      },
+      "inverter_temperature": {
+        "default": "mdi:thermometer"
+      }
+    }
+  }
+}

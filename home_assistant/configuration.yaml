@@ -1,0 +1,675 @@
+
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Optimized Recorder: Keep 3 days raw cell history in RAM/SSD, prevent DB bloat
+recorder:
+  purge_keep_days: 3
+  auto_purge: true
+  commit_interval: 10
+
+# EM11000 High-Speed Inverter Bridge (Local 2.5s Modbus via Wi-Fi Datalogger)
+em11000_bridge:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+template:
+  - sensor:
+      # 0. พลังงานแบตเตอรี่คงเหลือ (Wh) - คำนวณจาก SOC จริงของระบบ Huawei ESM x ความจุรวมออนไลน์ (38,400 Wh)
+      - name: "Battery Remaining Energy Wh"
+        unique_id: "92b32409100334_battery_remaining_energy_wh"
+        unit_of_measurement: "Wh"
+        device_class: "energy_storage"
+        state_class: measurement
+        state: >-
+          {% set soc = states('sensor.huawei_esm_battery_system_total_battery_system_soc') | float(states('sensor.home_energy_em11000_battery_soc') | float(0)) %}
+          {% set total_wh = states('sensor.battery_system_total_energy_available_wh') | float(38400) %}
+          {{ ((soc * total_wh) / 100) | round(0) }}
+
+      # 1. ความจุพลังงานจริงของระบบ (Wh) อัตโนมัติ: นับเฉพาะลูกที่ออนไลน์ x 4,800 Wh
+      - name: "Battery System Total Energy Available Wh"
+        unique_id: battery_system_total_energy_available_wh
+        unit_of_measurement: "Wh"
+        device_class: energy_storage
+        state: >-
+          {% set packs = [
+            states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0)
+          ] %}
+          {% set active_count = packs | select('gt', 20.0) | list | length %}
+          {{ active_count * 4800 }}
+
+      # 2. จุดตัดสลับไปใช้ไฟหลวง (30% สำรองไฟดับ)
+      - name: "Battery Shutdown SOC Setting"
+        unique_id: battery_shutdown_soc_setting
+        unit_of_measurement: "%"
+        state: 30
+
+      # 3. จุดตัดดับเครื่องป้องกันแบตเตอรี่หมดเกลี้ยง (20%)
+      - name: "Battery Shutdown Offgrid SOC Setting"
+        unique_id: battery_shutdown_offgrid_soc_setting
+        unit_of_measurement: "%"
+        state: 20
+
+      # 3.1 พลังงานพร้อมจ่ายก่อนตัดเข้าไฟหลวง (Usable Energy to 30% kWh)
+      - name: "Battery Usable Energy to 30 Percent kWh"
+        unique_id: battery_usable_energy_to_30_percent_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total
+        icon: mdi:battery-charging-high
+        state: >-
+          {% set soc = states('sensor.huawei_esm_battery_system_total_battery_system_soc') | float(0) %}
+          {% set total_kwh = (states('sensor.battery_system_total_energy_available_wh') | float(38400)) / 1000 %}
+          {% if soc > 30 %}
+            {{ (((soc - 30) / 100) * total_kwh) | round(2) }}
+          {% else %}
+            0.00
+          {% endif %}
+
+      # 3.2 พลังงานสำรองกรณีไฟดับฉุกเฉิน (Emergency Backup Reserve kWh = 30%)
+      - name: "Battery Emergency Reserve 30 Percent kWh"
+        unique_id: battery_emergency_reserve_30_percent_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy_storage
+        icon: mdi:shield-sun
+        state: >-
+          {% set total_kwh = (states('sensor.battery_system_total_energy_available_wh') | float(38400)) / 1000 %}
+          {{ (0.30 * total_kwh) | round(2) }}
+
+      # 3.3 ชั่วโมงการใช้งานแบตเตอรี่ที่เหลือ (Battery Hours Remaining)
+      - name: "Battery Hours Remaining"
+        unique_id: battery_hours_remaining
+        unit_of_measurement: "h"
+        icon: mdi:timer-sand
+        state: >-
+          {% set usable_kwh = states('sensor.battery_usable_energy_to_30_percent_kwh') | float(0) %}
+          {% set load_w = states('sensor.home_energy_em11000_output_power') | float(0) %}
+          {% set pv_w = states('sensor.home_energy_em11000_solar_total_power') | float(0) %}
+          {% set net_discharge_w = load_w - pv_w %}
+          {% if net_discharge_w > 100 and usable_kwh > 0 %}
+            {{ (usable_kwh / (net_discharge_w / 1000.0)) | round(1) }}
+          {% else %}
+            0.0
+          {% endif %}
+
+      # 3.4 เวลาที่แบตเตอรี่จะลดถึง 30% (Battery Cutoff Projected Time)
+      - name: "Battery Depletion Projected Time"
+        unique_id: battery_depletion_projected_time
+        icon: mdi:clock-alert-outline
+        state: >-
+          {% set usable_kwh = states('sensor.battery_usable_energy_to_30_percent_kwh') | float(0) %}
+          {% set load_w = states('sensor.home_energy_em11000_output_power') | float(0) %}
+          {% set pv_w = states('sensor.home_energy_em11000_solar_total_power') | float(0) %}
+          {% set net_discharge_w = load_w - pv_w %}
+          {% if net_discharge_w > 100 and usable_kwh > 0 %}
+            {% set hrs = usable_kwh / (net_discharge_w / 1000.0) %}
+            {{ (now() + timedelta(hours=hrs)).strftime('%H:%M น.') }}
+          {% elif pv_w > load_w %}
+            กำลังชาร์จไฟจากโซลาร์
+          {% else %}
+            สแตนด์บาย / แบตเตอรี่สำรอง
+          {% endif %}
+
+      # 3.5 สถานะการจ่ายไฟข้ามคืน (Battery Overnight Endurance Status)
+      - name: "Battery Overnight Endurance Status"
+        unique_id: battery_overnight_endurance_status
+        icon: mdi:weather-night
+        state: >-
+          {% set usable_kwh = states('sensor.battery_usable_energy_to_30_percent_kwh') | float(0) %}
+          {% set load_w = states('sensor.home_energy_em11000_output_power') | float(0) %}
+          {% set pv_w = states('sensor.home_energy_em11000_solar_total_power') | float(0) %}
+          {% set net_discharge_w = load_w - pv_w %}
+          {% if net_discharge_w > 100 and usable_kwh > 0 %}
+            {% set hrs = usable_kwh / (net_discharge_w / 1000.0) %}
+            {% set end_time = now() + timedelta(hours=hrs) %}
+            {% if end_time.strftime('%H:%M') >= '06:30' or hrs >= 8.0 %}
+              🟢 เพียงพอข้ามคืนถึงแดดออก
+            {% else %}
+              🟡 แบตเตอรี่จะตัดเข้าไฟหลวงประมาณ {{ end_time.strftime('%H:%M น.') }} ก่อนแดดมา
+            {% endif %}
+          {% elif pv_w > load_w %}
+            ☀️ มีแดดและกำลังชาร์จไฟ
+          {% else %}
+            ⚡ แบตเตอรี่แตะขีดจำกัดสำรองแล้ว
+          {% endif %}
+
+      # 4. จุดชาร์จเต็ม (100%)
+      - name: "Battery Full SOC Setting"
+        unique_id: battery_full_soc_setting
+        unit_of_measurement: "%"
+        state: 100
+
+      # 5. กำลังขับสูงสุดของอินเวอร์เตอร์ (11,000 W)
+      - name: "Inverter Max Power Setting"
+        unique_id: inverter_max_power_setting
+        unit_of_measurement: "W"
+        device_class: power
+        state: 11000
+
+      # 6. จำนวนแพ็กแบตเตอรี่ที่ออนไลน์ (ลูก)
+      - name: "Battery System Active Packs Count"
+        unique_id: battery_system_active_packs_count
+        icon: mdi:battery-check
+        state: >-
+          {% set packs = [
+            states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0)
+          ] %}
+          {{ packs | select('gt', 20.0) | list | length }}
+
+      # 7. ผลต่างแรงดันระหว่างแพ็ก (Delta V) สำหรับตรวจจับ Imbalance
+      - name: "Battery System Voltage Delta"
+        unique_id: battery_system_voltage_delta
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        icon: mdi:scale-balance
+        state: >-
+          {% set packs = [
+            states('sensor.huawei_esm_battery_system_pack_1_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_2_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_3_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_4_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_5_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_6_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_7_battery_voltage')|float(0),
+            states('sensor.huawei_esm_battery_system_pack_8_battery_voltage')|float(0)
+          ] %}
+          {% set active_v = packs | select('gt', 20.0) | list %}
+          {% if active_v | length > 1 %}
+            {{ ((active_v | max) - (active_v | min)) | round(3) }}
+          {% else %}
+            0.000
+          {% endif %}
+
+      # 8. สถานะความบาลานซ์ของแบตเตอรี่ (Balance Health Status)
+      - name: "Battery System Balance Health Status"
+        unique_id: battery_system_balance_health_status
+        icon: mdi:shield-check
+        state: >-
+          {% set p_delta = states('sensor.battery_system_voltage_delta') | float(0) %}
+          {% set c_delta = states('sensor.battery_system_cell_voltage_delta_mv') | float(0) %}
+          {% if p_delta <= 0.40 and c_delta <= 50 %}
+            ยอดเยี่ยม 🟢
+          {% elif p_delta <= 0.95 and c_delta <= 120 %}
+            ปกติ 🟡
+          {% else %}
+            เฝ้าระวัง 🔴
+          {% endif %}
+
+      # 9. กำลังไฟที่โซลาร์+แบตเตอรี่จ่ายเลี้ยงโหลดบ้านจริงขณะนี้ (W) - หักไฟหลวง Bypass ออก
+      - name: "Solar To House Power W"
+        unique_id: solar_to_house_power_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        state: >-
+          {% set mode = states('sensor.home_energy_em11000_operating_mode') %}
+          {% set load = states('sensor.home_energy_em11000_output_power') | float(0) %}
+          {% set grid = states('sensor.grid_import_power_w') | float(0) %}
+          {% set pv = states('sensor.home_energy_em11000_solar_total_power') | float(0) %}
+          {% set bp = states('sensor.huawei_esm_battery_system_total_battery_system_power') | float(states('sensor.home_energy_em11000_battery_power') | float(0)) %}
+          {% set bat_chg = [bp, 0] | max %}
+          {% set bat_dis = 0 if mode == 'Grid Mode' else ([-bp, 0] | max) %}
+          {% set max_avail = ([pv - bat_chg, 0] | max) + bat_dis %}
+          {% if max_avail < 30 or load <= grid %}
+            0.0
+          {% else %}
+            {{ ([([load - grid, 0] | max), max_avail] | min) | round(1) }}
+          {% endif %}
+
+      # 9.1 พลังงานที่โซลาร์+แบตจ่ายช่วยบ้านจริงวันนี้ (kWh) = บ้านใช้ไฟรวม - ดึงไฟหลวง (ถ้าอยู่โหมด SUB Bypass ตลอดวันจะได้ 0.00 kWh)
+      - name: "Solar Load Offset Today kWh"
+        unique_id: solar_load_offset_today_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total
+        icon: mdi:lightning-bolt-circle
+        state: >-
+          {% set house = states('sensor.house_energy_daily') | float(0) %}
+          {% set grid = states('sensor.grid_energy_daily') | float(0) %}
+          {% set direct = states('sensor.solar_to_house_energy_daily') | float(0) %}
+          {% set mode = states('sensor.home_energy_em11000_operating_mode') %}
+          {% set bat_dis_net = ([states('sensor.home_energy_em11000_day_battery_discharge') | float(0) - 0.19, 0] | max) if mode == 'Off-grid Mode' else 0 %}
+          {{ ([house - grid, direct, bat_dis_net, 0] | max) | round(2) }}
+
+      # 9.2 พลังงานที่โซลาร์+แบตจ่ายช่วยบ้านจริงเมื่อวาน (kWh)
+      - name: "Solar Load Offset Yesterday kWh"
+        unique_id: solar_load_offset_yesterday_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total
+        icon: mdi:lightning-bolt-circle
+        state: >-
+          {% set house = state_attr('sensor.house_energy_daily', 'last_period') | float(0) %}
+          {% set grid = state_attr('sensor.grid_energy_daily', 'last_period') | float(0) %}
+          {{ ([house - grid, 0] | max) | round(2) }}
+
+      # 9.3 พลังงานที่โซลาร์+แบตจ่ายช่วยบ้านจริงรอบบิลนี้ (kWh)
+      - name: "Solar Load Offset Billing Cycle kWh"
+        unique_id: solar_load_offset_billing_cycle_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total
+        icon: mdi:lightning-bolt-circle
+        state: >-
+          {% set house = states('sensor.house_energy_billing_cycle') | float(0) %}
+          {% set grid = states('sensor.grid_energy_billing_cycle') | float(0) %}
+          {{ ([house - grid, 0] | max) | round(2) }}
+
+      # 9.4 มูลค่าพลังงานโซลาร์ที่ชาร์จเก็บลงแบตเตอรี่วันนี้ (บาท) - รอจ่ายเมื่อสลับเป็น SBU
+      - name: "Solar Stored In Battery Value Today"
+        unique_id: solar_stored_in_battery_value_today
+        unit_of_measurement: "THB"
+        icon: mdi:battery-charging-high
+        state_class: total
+        state: >-
+          {{ (states('sensor.home_energy_em11000_day_battery_charge') | float(0) * 4.5) | round(2) }}
+
+      # 9.5 เงินค่าไฟบ้านที่ประหยัดได้จริงวันนี้ (บาท) - คำนวณเฉพาะไฟที่โซลาร์+แบตจ่ายแทนไฟหลวงเข้าบ้านจริง x 4.50 บ.
+      - name: "Solar Energy Cost Saved Today"
+        unique_id: solar_energy_cost_saved_today
+        unit_of_measurement: "THB"
+        icon: mdi:cash-multiple
+        state_class: total
+        state: >-
+          {{ (states('sensor.solar_load_offset_today_kwh') | float(0) * 4.5) | round(2) }}
+
+      # 10. ประสิทธิภาพการกักเก็บและจ่ายไฟแบตเตอรี่ (Round-Trip Efficiency %)
+      - name: "Battery Round Trip Efficiency"
+        unique_id: battery_round_trip_efficiency
+        unit_of_measurement: "%"
+        icon: mdi:percent-outline
+        state_class: measurement
+        state: >-
+          {% set charge = states('sensor.home_energy_em11000_day_battery_charge') | float(0) %}
+          {% set discharge = states('sensor.home_energy_em11000_day_battery_discharge') | float(0) %}
+          {% if charge >= 5.0 and discharge >= 5.0 %}
+            {% set rte = (discharge / charge) * 100 %}
+            {% if rte >= 75.0 and rte <= 99.0 %}
+              {{ rte | round(1) }}
+            {% else %}
+              94.5
+            {% endif %}
+          {% else %}
+            94.5
+          {% endif %}
+
+      # 11. กำลังไฟนำเข้าจากไฟหลวง (W) - กรองเฉพาะค่าบวก
+      - name: "Grid Import Power W"
+        unique_id: grid_import_power_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:transmission-tower
+        state: >-
+          {{ [states('sensor.home_energy_em11000_grid_power') | float(0), 0] | max }}
+
+      # 12. ค่าไฟหลวงสะสมรอบบิลนี้ (บาท) - บวกทบรายวันตามอัตราอ้างอิง 4.50 บ./หน่วย (ตรงกับผลรวมรายวัน)
+      - name: "Grid Cost Billing Cycle"
+        unique_id: grid_cost_billing_cycle
+        unit_of_measurement: "THB"
+        icon: mdi:currency-thb
+        state_class: total
+        state: >-
+          {{ (states('sensor.grid_energy_billing_cycle') | float(0) * 4.5) | round(2) }}
+
+      # 12.01 ค่าไฟหลวงรอบบิลนี้ตามสูตรขั้นบันได PEA สุทธิ (หักสิทธิลดหย่อน G1 50 หน่วยแรก + Ft + VAT 7%)
+      - name: "Grid Cost Billing Cycle PEA Net"
+        unique_id: grid_cost_billing_cycle_pea_net
+        unit_of_measurement: "THB"
+        icon: mdi:receipt-text-check
+        state_class: total
+        state: >-
+          {% set u = states('sensor.grid_energy_billing_cycle') | float(0) %}
+          {% if u <= 0 %}
+            0.00
+          {% else %}
+            {% if u <= 200 %}
+              {% set base = u * 3.0000 %}
+            {% elif u <= 400 %}
+              {% set base = 200 * 3.0000 + (u - 200) * 4.1584 %}
+            {% else %}
+              {% set base = 200 * 3.0000 + 200 * 4.1584 + (u - 400) * 4.3583 %}
+            {% endif %}
+            {% set svc = 24.62 %}
+            {% set ft = (u * 0.1623) | round(2) %}
+            {% set disc = 156.42 if u >= 50 else (u * 3.1284) | round(2) %}
+            {% set sub = base + svc + ft - disc %}
+            {% set vat = (sub * 0.07) | round(2) %}
+            {{ ([sub + vat, 0] | max) | round(2) }}
+          {% endif %}
+
+      # 12.1 ค่าไฟหลวงรอบบิลที่แล้ว (บาท) - บิลจริง PEA ล่าสุด (20 ต.ค. 69 = 1,233.81 บาท)
+      - name: "Grid Cost Last Billing Cycle"
+        unique_id: grid_cost_last_billing_cycle
+        unit_of_measurement: "THB"
+        icon: mdi:currency-thb
+        state_class: total
+        state: >-
+          {% set u = state_attr('sensor.grid_energy_billing_cycle', 'last_period') | float(0) %}
+          {% if u <= 1.0 %}
+            1233.81
+          {% else %}
+            {% if u <= 200 %}
+              {% set base = u * 3.0000 %}
+            {% elif u <= 400 %}
+              {% set base = 200 * 3.0000 + (u - 200) * 4.1584 %}
+            {% else %}
+              {% set base = 200 * 3.0000 + 200 * 4.1584 + (u - 400) * 4.3583 %}
+            {% endif %}
+            {% set svc = 24.62 %}
+            {% set ft = (u * 0.1623) | round(2) %}
+            {% set disc = 156.42 if u >= 50 else (u * 3.1284) | round(2) %}
+            {% set sub = base + svc + ft - disc %}
+            {% set vat = (sub * 0.07) | round(2) %}
+            {{ ([sub + vat, 0] | max) | round(2) }}
+          {% endif %}
+
+      # 13. ค่าไฟหลวงที่ใช้ไปวันนี้ (บาท)
+      - name: "Grid Cost Today"
+        unique_id: grid_cost_today
+        unit_of_measurement: "THB"
+        icon: mdi:currency-thb
+        state_class: total
+        state: >-
+          {{ (states('sensor.grid_energy_daily') | float(0) * 4.5) | round(2) }}
+
+      # 14. เงินค่าไฟบ้านที่ประหยัดได้จริงในรอบบิลนี้ (บาท) = ไฟที่โซลาร์+แบตจ่ายแทนไฟหลวงเข้าบ้านจริง x 4.50 บ.
+      - name: "Solar Energy Cost Saved Billing Cycle"
+        unique_id: solar_energy_cost_saved_billing_cycle
+        unit_of_measurement: "THB"
+        icon: mdi:cash-multiple
+        state_class: total
+        state: >-
+          {% set house = states('sensor.house_energy_billing_cycle') | float(0) %}
+          {% set grid = states('sensor.grid_energy_billing_cycle') | float(0) %}
+          {{ (([house - grid, 0] | max) * 4.5) | round(2) }}
+
+      # 15. ยอดประหยัดค่าไฟจริงรอบบิลนี้ (บาท) = (บ้านใช้ไฟรวม - ดึงไฟหลวง) x 4.50
+      - name: "Net Solar Savings Billing Cycle"
+        unique_id: net_solar_savings_billing_cycle
+        unit_of_measurement: "THB"
+        icon: mdi:piggy-bank
+        state_class: total
+        state: >-
+          {% set house = states('sensor.house_energy_billing_cycle') | float(0) %}
+          {% set grid = states('sensor.grid_energy_billing_cycle') | float(0) %}
+          {{ (([house - grid, 0] | max) * 4.5) | round(2) }}
+
+      # 15.1 มูลค่าไฟที่บ้านใช้ไปวันนี้ (บาท) - คำนวณตามอัตรา 4.50 บ./หน่วย
+      - name: "House Cost Today"
+        unique_id: house_cost_today
+        unit_of_measurement: "THB"
+        icon: mdi:home-lightning-bolt
+        state_class: total
+        state: >-
+          {{ (states('sensor.house_energy_daily') | float(0) * 4.5) | round(2) }}
+
+      # 15.2 มูลค่าไฟที่บ้านใช้ในรอบบิลนี้ (บาท) - ตัดรอบวันที่ 20
+      - name: "House Cost Billing Cycle"
+        unique_id: house_cost_billing_cycle
+        unit_of_measurement: "THB"
+        icon: mdi:home-lightning-bolt
+        state_class: total
+        state: >-
+          {{ (states('sensor.house_energy_billing_cycle') | float(0) * 4.5) | round(2) }}
+
+      # 15.3 ยอดประหยัดค่าไฟจริงวันนี้ (บาท) = ไฟที่โซลาร์+แบตจ่ายแทนไฟหลวงเข้าบ้านจริง x 4.50
+      - name: "Net Solar Savings Today"
+        unique_id: net_solar_savings_today
+        unit_of_measurement: "THB"
+        icon: mdi:piggy-bank
+        state_class: total
+        state: >-
+          {{ (states('sensor.solar_load_offset_today_kwh') | float(0) * 4.5) | round(2) }}
+
+      # 15.4 เงินค่าไฟบ้านที่ประหยัดได้จริงเมื่อวาน (บาท) = (บ้านใช้เมื่อวาน - ไฟหลวงเมื่อวาน) x 4.50
+      - name: "Solar Energy Cost Saved Yesterday"
+        unique_id: solar_energy_cost_saved_yesterday
+        unit_of_measurement: "THB"
+        icon: mdi:cash-multiple
+        state_class: total
+        state: >-
+          {% set house = state_attr('sensor.house_energy_daily', 'last_period') | float(0) %}
+          {% set grid = state_attr('sensor.grid_energy_daily', 'last_period') | float(0) %}
+          {{ (([house - grid, 0] | max) * 4.5) | round(2) }}
+
+      # 15.5 มูลค่าไฟที่บ้านใช้เมื่อวาน (บาท)
+      - name: "House Cost Yesterday"
+        unique_id: house_cost_yesterday
+        unit_of_measurement: "THB"
+        icon: mdi:home-lightning-bolt
+        state_class: total
+        state: >-
+          {{ (state_attr('sensor.house_energy_daily', 'last_period') | float(0) * 4.5) | round(2) }}
+
+      # 15.6 ค่าไฟหลวงที่ใช้เมื่อวาน (บาท)
+      - name: "Grid Cost Yesterday"
+        unique_id: grid_cost_yesterday
+        unit_of_measurement: "THB"
+        icon: mdi:currency-thb
+        state_class: total
+        state: >-
+          {{ (state_attr('sensor.grid_energy_daily', 'last_period') | float(0) * 4.5) | round(2) }}
+
+      # 15.7 ยอดประหยัดค่าไฟจริงเมื่อวาน (บาท) = (บ้านใช้เมื่อวาน - ไฟหลวงเมื่อวาน) x 4.50
+      - name: "Net Solar Savings Yesterday"
+        unique_id: net_solar_savings_yesterday
+        unit_of_measurement: "THB"
+        icon: mdi:piggy-bank
+        state_class: total
+        state: >-
+          {% set house = state_attr('sensor.house_energy_daily', 'last_period') | float(0) %}
+          {% set grid = state_attr('sensor.grid_energy_daily', 'last_period') | float(0) %}
+          {{ (([house - grid, 0] | max) * 4.5) | round(2) }}
+
+      # 16. ข้อมูลเซลล์ที่แรงดันสูงสุด (120 เซลล์)
+      - name: "Battery System Highest Cell Info"
+        unique_id: battery_system_highest_cell_info
+        icon: mdi:battery-arrow-up
+        state: >-
+          {% set ns = namespace(max_cv=0, max_c='-') %}
+          {% for p in range(1, 9) %}
+            {% for c in range(1, 16) %}
+              {% set c_pad = '%02d' % c %}
+              {% set v = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_cell_' ~ c_pad ~ '_voltage') | float(0) %}
+              {% if v > 2.0 and v > ns.max_cv %}
+                {% set ns.max_cv = v %}
+                {% set ns.max_c = 'Pack ' ~ p ~ ' เซลล์ ' ~ c ~ ' (' ~ (v | round(3)) ~ 'V)' %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ ns.max_c }}
+
+      # 17. ข้อมูลเซลล์ที่แรงดันต่ำสุด (120 เซลล์)
+      - name: "Battery System Lowest Cell Info"
+        unique_id: battery_system_lowest_cell_info
+        icon: mdi:battery-arrow-down
+        state: >-
+          {% set ns = namespace(min_cv=999, min_c='-') %}
+          {% for p in range(1, 9) %}
+            {% for c in range(1, 16) %}
+              {% set c_pad = '%02d' % c %}
+              {% set v = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_cell_' ~ c_pad ~ '_voltage') | float(0) %}
+              {% if v > 2.0 and v < ns.min_cv %}
+                {% set ns.min_cv = v %}
+                {% set ns.min_c = 'Pack ' ~ p ~ ' เซลล์ ' ~ c ~ ' (' ~ (v | round(3)) ~ 'V)' %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ ns.min_c }}
+
+      # 18. ผลต่างแรงดันระหว่างเซลล์ (Cell Voltage Delta mV)
+      - name: "Battery System Cell Voltage Delta mV"
+        unique_id: battery_system_cell_voltage_delta_mv
+        unit_of_measurement: "mV"
+        icon: mdi:scale-balance
+        state_class: measurement
+        state: >-
+          {% set ns = namespace(max_cv=0, min_cv=999) %}
+          {% for p in range(1, 9) %}
+            {% for c in range(1, 16) %}
+              {% set c_pad = '%02d' % c %}
+              {% set v = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_cell_' ~ c_pad ~ '_voltage') | float(0) %}
+              {% if v > 2.0 %}
+                {% if v > ns.max_cv %}{% set ns.max_cv = v %}{% endif %}
+                {% if v < ns.min_cv %}{% set ns.min_cv = v %}{% endif %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {% if ns.max_cv > 0 and ns.min_cv < 999 %}
+            {{ ((ns.max_cv - ns.min_cv) * 1000) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+
+      # 19. ข้อมูลแพ็กที่แรงดันรวมสูงสุด
+      - name: "Battery System Highest Pack Info"
+        unique_id: battery_system_highest_pack_info
+        icon: mdi:battery-plus
+        state: >-
+          {% set ns = namespace(max_pv=0, max_p='-') %}
+          {% for p in range(1, 9) %}
+            {% set pv = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_battery_voltage') | float(0) %}
+            {% if pv > 20 and pv > ns.max_pv %}
+              {% set ns.max_pv = pv %}
+              {% set ns.max_p = 'Pack ' ~ p ~ ' (' ~ (pv | round(2)) ~ 'V)' %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.max_p }}
+
+      # 20. ข้อมูลแพ็กที่แรงดันรวมต่ำสุด
+      - name: "Battery System Lowest Pack Info"
+        unique_id: battery_system_lowest_pack_info
+        icon: mdi:battery-minus
+        state: >-
+          {% set ns = namespace(min_pv=999, min_p='-') %}
+          {% for p in range(1, 9) %}
+            {% set pv = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_battery_voltage') | float(0) %}
+            {% if pv > 20 and pv < ns.min_pv %}
+              {% set ns.min_pv = pv %}
+              {% set ns.min_p = 'Pack ' ~ p ~ ' (' ~ (pv | round(2)) ~ 'V)' %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.min_p }}
+
+      # 21. ข้อมูลแพ็กที่อุณหภูมิสูงสุด
+      - name: "Battery System Warmest Pack Info"
+        unique_id: battery_system_warmest_pack_info
+        icon: mdi:thermometer-high
+        state: >-
+          {% set ns = namespace(max_t=0, max_tp='-') %}
+          {% for p in range(1, 9) %}
+            {% set t = states('sensor.huawei_esm_battery_system_pack_' ~ p ~ '_max_cell_temperature') | float(0) %}
+            {% if t > ns.max_t %}
+              {% set ns.max_t = t %}
+              {% set ns.max_tp = 'Pack ' ~ p ~ ' (' ~ (t | round(1)) ~ '°C)' %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.max_tp }}
+
+# ==========================================
+# Riemann Sum Integral: แปลงกำลังไฟ (W) เป็นพลังงานสะสม (kWh)
+# ==========================================
+sensor:
+  - platform: integration
+    source: sensor.grid_import_power_w
+    name: "Grid Energy Total Imported"
+    unique_id: grid_energy_total_imported
+    unit_prefix: k
+    unit_time: h
+    round: 3
+    method: left
+
+  # พลังงานรวมที่บ้านใช้สะสม (kWh) - คำนวณจากกำลังไฟโหลดขาออกของอินเวอร์เตอร์
+  - platform: integration
+    source: sensor.home_energy_em11000_output_power
+    name: "House Energy Total Consumed"
+    unique_id: house_energy_total_consumed
+    unit_prefix: k
+    unit_time: h
+    round: 3
+    method: left
+
+  # พลังงานที่โซลาร์+แบตเตอรี่จ่ายเลี้ยงบ้านจริงสะสม (kWh) - หักไฟหลวง Bypass ออก
+  - platform: integration
+    source: sensor.solar_to_house_power_w
+    name: "Solar To House Energy Total"
+    unique_id: solar_to_house_energy_total
+    unit_prefix: k
+    unit_time: h
+    round: 3
+    method: left
+
+# ==========================================
+# Utility Meter: สะสมพลังงานตัดรอบบิลทุกวันที่ 20 ของเดือน
+# ==========================================
+utility_meter:
+  # 1. พลังงานไฟหลวงนำเข้ารอบบิล (ตัดรอบวันที่ 20 เวลา 00:00 น.)
+  grid_energy_billing_cycle:
+    source: sensor.grid_energy_total_imported
+    name: "Grid Energy Billing Cycle"
+    cycle: monthly
+    offset:
+      days: 19
+
+  # 2. พลังงานไฟหลวงนำเข้ารายวัน
+  grid_energy_daily:
+    source: sensor.grid_energy_total_imported
+    name: "Grid Energy Daily"
+    cycle: daily
+
+  # 3. พลังงานโซลาร์ผลิตสะสมรอบบิล (ตัดรอบวันที่ 20 เวลา 00:00 น.)
+  solar_energy_billing_cycle:
+    source: sensor.home_energy_em11000_energy_total
+    name: "Solar Energy Billing Cycle"
+    cycle: monthly
+    offset:
+      days: 19
+
+  # 4. พลังงานโซลาร์ผลิตสะสมรายวัน
+  solar_energy_daily:
+    source: sensor.home_energy_em11000_energy_total
+    name: "Solar Energy Daily"
+    cycle: daily
+
+  # 5. พลังงานที่บ้านใช้รายวัน
+  house_energy_daily:
+    source: sensor.house_energy_total_consumed
+    name: "House Energy Daily"
+    cycle: daily
+
+  # 6. พลังงานที่บ้านใช้รอบบิล (ตัดรอบวันที่ 20 เวลา 00:00 น.)
+  house_energy_billing_cycle:
+    source: sensor.house_energy_total_consumed
+    name: "House Energy Billing Cycle"
+    cycle: monthly
+    offset:
+      days: 19
+
+  # 7. พลังงานที่โซลาร์+แบตจ่ายเลี้ยงบ้านจริงรายวัน
+  solar_to_house_energy_daily:
+    source: sensor.solar_to_house_energy_total
+    name: "Solar To House Energy Daily"
+    cycle: daily

@@ -1,0 +1,16 @@
+{
+  "domain": "dess_solar",
+  "name": "DessMonitor Solar Universal",
+  "codeowners": ["@groove-max"],
+  "config_flow": true,
+  "documentation": "https://github.com/groove-max/dess_solar",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/groove-max/dess_solar/issues",
+  "loggers": ["custom_components.dess_solar"],
+  "quality_scale": "gold",
+  "requirements": [
+    "aiohttp>=3.8.0"
+  ],
+  "version": "1.1.0"
+}

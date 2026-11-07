@@ -1,0 +1,606 @@
+- id: solar_low_battery_alert
+  alias: 'Solar: แจ้งเตือนแบตเตอรี่ใกล้แตะจุดสำรองฉุกเฉิน (32%)'
+  description: แจ้งเตือนเข้า HA App เมื่อแบตเตอรี่ลดลงถึง 32% พร้อมระบุเซลล์และแพ็กที่ต่ำสุด (เตือนครั้งเดียวต่อรอบ เว้นระยะ 2 ชม.)
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.huawei_esm_battery_system_total_battery_system_soc
+      below: 32.1
+  condition:
+    - condition: numeric_state
+      entity_id: sensor.huawei_esm_battery_system_total_battery_system_soc
+      above: 25
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 7200 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: ⚠️ แบตเตอรี่ใกล้แตะจุดสำรองฉุกเฉิน (32%)
+        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (30%) เพื่อสำรอง 30% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
+        data:
+          push:
+            sound: default
+          group: solar-alerts
+    - service: notify.mobile_app_motorola_edge_20_pro
+      data:
+        title: ⚠️ แบตเตอรี่ใกล้แตะจุดสำรองฉุกเฉิน (32%)
+        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (30%) เพื่อสำรอง 30% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
+        data:
+          push:
+            sound: default
+          group: solar-alerts
+  mode: single
+- id: solar_high_load_warning
+  alias: 'Solar: แจ้งเตือนโหลดบ้านสูงเกินพิกัด (>9.5 kW)'
+  description: แจ้งเตือนเข้า HA App เมื่อโหลดบ้านเกิน 9,500W ต่อเนื่อง 30 วินาที เพื่อป้องกันเครื่องทริป (เว้นระยะ 15 นาที)
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.home_energy_em11000_output_power
+      above: 9500
+      for:
+        seconds: 30
+  condition:
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 900 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: 🚨 เตือนโหลดบ้านสูงเกินพิกัด (>9.5 kW)
+        message: กำลังใช้ไฟ {{ (states("sensor.home_energy_em11000_output_power") | float(0) / 1000) | round(2) }} kW ใกล้ขีดจำกัดอินเวอร์เตอร์ 11kW ระวังเครื่องตัด!
+        data:
+          push:
+            sound: critical
+          group: solar-alerts
+    - service: notify.mobile_app_motorola_edge_20_pro
+      data:
+        title: 🚨 เตือนโหลดบ้านสูงเกินพิกัด (>9.5 kW)
+        message: กำลังใช้ไฟ {{ (states("sensor.home_energy_em11000_output_power") | float(0) / 1000) | round(2) }} kW ใกล้ขีดจำกัดอินเวอร์เตอร์ 11kW ระวังเครื่องตัด!
+        data:
+          push:
+            sound: critical
+          group: solar-alerts
+  mode: single
+- id: solar_battery_imbalance_temp_alert
+  alias: 'Solar: แจ้งเตือนสุขภาพแบตเตอรี่ระบุแพ็กและเซลล์'
+  description: แจ้งเตือนเมื่อตรวจพบความต่างแรงดันสูง หรืออุณหภูมิสูง พร้อมระบุแพ็กและเซลล์ที่ผิดปกติ (เว้นระยะ 2 ชม.)
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.battery_system_voltage_delta
+      above: 1.1
+      for:
+        minutes: 5
+    - platform: numeric_state
+      entity_id: sensor.battery_system_cell_voltage_delta_mv
+      above: 150
+      for:
+        minutes: 5
+    - platform: numeric_state
+      entity_id: sensor.huawei_esm_battery_system_max_battery_cell_temperature
+      above: 48
+      for:
+        minutes: 3
+  condition:
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 7200 }}'
+  action:
+    - choose:
+        # กรณีที่ 1: อุณหภูมิสูงเกิน 48 องศา
+        - conditions:
+            - condition: numeric_state
+              entity_id: sensor.huawei_esm_battery_system_max_battery_cell_temperature
+              above: 48
+          sequence:
+            - service: notify.notify
+              data:
+                title: '🔥 แจ้งเตือนอุณหภูมิตู้แบตเตอรี่สูง!'
+                message: >-
+                  ตรวจพบอุณหภูมิแบตเตอรี่สูงเกินเกณฑ์:
+                  🌡️ {{ states('sensor.battery_system_warmest_pack_info') }}
+                  กรุณาตรวจสอบการระบายอากาศหรือพัดลมในตู้แบตเตอรี่
+                data:
+                  push:
+                    sound: default
+                  group: solar-alerts
+
+        # กรณีที่ 2: แบตเตอรี่ใกล้เต็ม (SOC > 88% หรือ V > 52.0V) -> Top-Balancing ปกติ
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: numeric_state
+                  entity_id: sensor.huawei_esm_battery_system_total_battery_system_soc
+                  above: 88
+                - condition: numeric_state
+                  entity_id: sensor.home_energy_em11000_battery_voltage
+                  above: 52.0
+          sequence:
+            - service: notify.notify
+              data:
+                title: '🔋 แบตเตอรี่ใกล้เต็ม: ระบบกำลังทำ Top-Balancing (สถานะปกติ)'
+                message: >-
+                  แบตเตอรี่ชาร์จขึ้นมาถึง {{ states('sensor.huawei_esm_battery_system_total_battery_system_soc') }}% ({{ states('sensor.home_energy_em11000_battery_voltage') }}V):
+                  เซลล์แตะช่วงหัวกราฟและดีดตัวตามธรรมชาติ:
+                  🔵 เซลล์สูงสุด: {{ states('sensor.battery_system_highest_cell_info') }}
+                  🔴 เซลล์ต่ำสุด: {{ states('sensor.battery_system_lowest_cell_info') }}
+                  ⚡ ผลต่างเซลล์: {{ states('sensor.battery_system_cell_voltage_delta_mv') }} mV
+                  ✅ ระบบได้ปรับลดกระแสชาร์จลงอัตโนมัติเพื่อเกลี่ยเซลล์ ไม่มีความเสี่ยง สบายใจได้ครับ
+                data:
+                  push:
+                    sound: default
+                  group: solar-status
+
+      # กรณีที่ 3: ผิดปกติจริงขณะใช้งานทั่วไป (SOC < 88% แต่เซลล์ต่างกันเยอะ)
+      default:
+        - service: notify.notify
+          data:
+            title: '⚠️ แจ้งเตือนความผิดปกติ: เซลล์ไม่บาลานซ์ช่วงใช้งาน'
+            message: >-
+              ตรวจพบเซลล์ต่างกันเกินเกณฑ์ปกติขณะแบตยังไม่เต็ม (SOC {{ states('sensor.huawei_esm_battery_system_total_battery_system_soc') }}%):
+              🔴 เซลล์ต่ำสุด: {{ states('sensor.battery_system_lowest_cell_info') }}
+              🔵 เซลล์สูงสุด: {{ states('sensor.battery_system_highest_cell_info') }}
+              ⚡ ผลต่างเซลล์: {{ states('sensor.battery_system_cell_voltage_delta_mv') }} mV
+              📦 แพ็กต่ำสุด: {{ states('sensor.battery_system_lowest_pack_info') }}
+              📦 แพ็กสูงสุด: {{ states('sensor.battery_system_highest_pack_info') }} (ΔV {{ states('sensor.battery_system_voltage_delta') }}V)
+              แนะนำให้ตรวจสอบการขันขั้วต่อหรือเช็คสุขภาพเซลล์
+            data:
+              push:
+                sound: default
+              group: solar-alerts
+  mode: single
+- id: solar_daily_energy_cost_summary_log
+  alias: 'Solar: สรุปยอดประหยัดไฟและพลังงานประจำวัน (23:59)'
+  description: บันทึกและส่งรายงานสรุปยอดผลิตโซลาร์ การใช้ไฟบ้าน และเงินที่ประหยัดได้จริงประจำวัน เข้ามือถือและเก็บบันทึกประวัติ
+  trigger:
+    - platform: time
+      at: '23:59:00'
+  action:
+    - service: notify.notify
+      data:
+        title: 📊 สรุปยอดพลังงานและเงินประจำวัน ({{ now().strftime("%d/%m/%Y") }})
+        message: '☀️ โซลาร์ผลิตวันนี้: {{ states(''sensor.home_energy_em11000_energy_today'') }} kWh (ชาร์จเก็บลงแบต {{ states(''sensor.home_energy_em11000_day_battery_charge'') }} kWh / จ่ายออกแบต {{ states(''sensor.home_energy_em11000_day_battery_discharge'') }} kWh) 🏠 ไฟที่บ้านใช้รวม: {{ states(''sensor.house_energy_daily'') }} kWh (มูลค่า ฿{{ states(''sensor.house_cost_today'') }}) ⚡ ดึงไฟหลวง (PEA): {{ states(''sensor.grid_energy_daily'') }} kWh (จ่าย ฿{{ states(''sensor.grid_cost_today'') }}) 💰 โซลาร์+แบตจ่ายช่วยบ้านจริง: {{ states(''sensor.solar_load_offset_today_kwh'') }} kWh (ประหยัด ฿{{ states(''sensor.net_solar_savings_today'') }})'
+        data:
+          push:
+            sound: default
+          group: solar-daily-summary
+    - service: persistent_notification.create
+      data:
+        notification_id: daily_summary_{{ now().strftime("%Y%m%d") }}
+        title: '📊 สรุปยอดประจำวัน: {{ now().strftime("%d/%m/%Y") }}'
+        message: '- **โซลาร์ผลิตวันนี้:** {{ states(''sensor.home_energy_em11000_energy_today'') }} kWh *(ชาร์จเก็บลงแบต {{ states(''sensor.home_energy_em11000_day_battery_charge'') }} kWh / มูลค่าสำรอง ฿{{ states(''sensor.solar_stored_in_battery_value_today'') }})* - **บ้านใช้ไฟรวม:** {{ states(''sensor.house_energy_daily'') }} kWh (มูลค่า **฿{{ states(''sensor.house_cost_today'') }}**) - **ดึงไฟหลวง PEA:** {{ states(''sensor.grid_energy_daily'') }} kWh (จ่าย **฿{{ states(''sensor.grid_cost_today'') }}**) - **โซลาร์+แบตจ่ายช่วยบ้านจริง:** {{ states(''sensor.solar_load_offset_today_kwh'') }} kWh (ประหยัด **฿{{ states(''sensor.net_solar_savings_today'') }}**)'
+  mode: single
+- id: solar_monthly_billing_cycle_summary_log
+  alias: 'Solar: สรุปยอดตัดรอบบิลประจำเดือน (วันที่ 19 เวลา 23:59 ก่อนตัดรอบ 20)'
+  description: บันทึกและส่งรายงานสรุปยอดรอบบิลประจำเดือน (ตัดรอบวันที่ 20) เข้ามือถือและเก็บบันทึกประวัติ
+  trigger:
+    - platform: time
+      at: '23:59:00'
+  condition:
+    - condition: template
+      value_template: '{{ now().day == 19 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: 🏆 สรุปยอดตัดรอบบิลโซลาร์ประจำเดือน (รอบบิลวันที่ 20)
+        message: 'สรุปยอดรอบบิลสิ้นสุด {{ now().strftime("%d/%m/%Y") }}: ☀️ โซลาร์ผลิตสะสม: {{ states(''sensor.solar_energy_billing_cycle'') }} kWh 🏠 ไฟที่บ้านใช้รวม: {{ states(''sensor.house_energy_billing_cycle'') }} kWh (มูลค่า ฿{{ states(''sensor.house_cost_billing_cycle'') }}) ⚡ ดึงไฟหลวง (PEA): {{ states(''sensor.grid_energy_billing_cycle'') }} kWh (สะสม ฿{{ states(''sensor.grid_cost_billing_cycle'') }} | จ่ายสุทธิ ฿{{ states(''sensor.grid_cost_billing_cycle_pea_net'') }}) 💰 โซลาร์+แบตจ่ายช่วยบ้านจริง: {{ states(''sensor.solar_load_offset_billing_cycle_kwh'') }} kWh (ประหยัด ฿{{ states(''sensor.net_solar_savings_billing_cycle'') }})'
+        data:
+          push:
+            sound: default
+          group: solar-monthly-summary
+    - service: persistent_notification.create
+      data:
+        notification_id: monthly_summary_{{ now().strftime("%Y%m") }}
+        title: 🏆 สรุปยอดรอบบิล {{ now().strftime("%B %Y") }}
+        message: 'สรุปยอดรอบบิลสิ้นสุด {{ now().strftime("%d/%m/%Y") }}: - **โซลาร์ผลิตสะสม:** {{ states(''sensor.solar_energy_billing_cycle'') }} kWh - **บ้านใช้ไฟรวม:** {{ states(''sensor.house_energy_billing_cycle'') }} kWh (มูลค่า **฿{{ states(''sensor.house_cost_billing_cycle'') }}**) - **ดึงไฟหลวง PEA:** {{ states(''sensor.grid_energy_billing_cycle'') }} kWh (สะสม **฿{{ states(''sensor.grid_cost_billing_cycle'') }}** | จ่ายสุทธิ **฿{{ states(''sensor.grid_cost_billing_cycle_pea_net'') }}**) - **โซลาร์+แบตจ่ายช่วยบ้านจริง:** {{ states(''sensor.solar_load_offset_billing_cycle_kwh'') }} kWh (ประหยัด **฿{{ states(''sensor.net_solar_savings_billing_cycle'') }}**)'
+  mode: single
+- id: solar_operating_mode_change_summary
+  alias: 'Solar: บันทึกและสรุปยอดไฟทุกครั้งที่สลับโหมด (SUB ↔ SBU)'
+  description: แจ้งเตือนและบันทึกยอดใช้ไฟจาก Grid รายวัน + ยอดสะสมทบรอบบิล ทุกครั้งที่อินเวอร์เตอร์สลับโหมดการทำงาน
+  trigger:
+    - platform: state
+      entity_id: sensor.home_energy_em11000_operating_mode
+      from:
+        - Grid Mode
+        - Off-grid Mode
+      to:
+        - Grid Mode
+        - Off-grid Mode
+  action:
+    - service: notify.notify
+      data:
+        title: '🔄 สลับโหมดอินเวอร์เตอร์: {{ trigger.from_state.state }} ➔ {{ trigger.to_state.state }}'
+        message: 'เวลาสลับโหมด: {{ now().strftime("%H:%M น.") }} ({{ states(''sensor.home_energy_em11000_main_output_priority'') }}) ⚡ ดึงไฟหลวงวันนี้ (สะสม): {{ states(''sensor.grid_energy_daily'') }} kWh (จ่าย ฿{{ states(''sensor.grid_cost_today'') }}) 🔋 โซลาร์+แบตช่วยบ้านวันนี้: {{ states(''sensor.solar_load_offset_today_kwh'') }} kWh (ประหยัด ฿{{ states(''sensor.net_solar_savings_today'') }}) 📅 สะสมทบรอบบิลนี้ (ตั้งแต่ 20): {{ states(''sensor.grid_energy_billing_cycle'') }} kWh (สะสม ฿{{ states(''sensor.grid_cost_billing_cycle'') }} | จ่ายสุทธิ PEA ฿{{ states(''sensor.grid_cost_billing_cycle_pea_net'') }})'
+        data:
+          push:
+            sound: default
+          group: solar-mode-switch
+    - service: persistent_notification.create
+      data:
+        notification_id: mode_switch_{{ now().strftime("%Y%m%d_%H%M%S") }}
+        title: '🔄 สลับโหมด ({{ now().strftime("%H:%M น.") }}): {{ trigger.from_state.state }} ➔ {{ trigger.to_state.state }}'
+        message: '- **โหมดปัจจุบัน:** {{ trigger.to_state.state }} ({{ states(''sensor.home_energy_em11000_main_output_priority'') }}) - **แบตเตอรี่คงเหลือ:** {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% ({{ (states(''sensor.battery_remaining_energy_wh'') | float(0) / 1000) | round(2) }} kWh) - **ดึงไฟหลวงวันนี้ (บวกทบทุกครั้งที่ใช้ Grid):** {{ states(''sensor.grid_energy_daily'') }} kWh (จ่าย **฿{{ states(''sensor.grid_cost_today'') }}**) - **โซลาร์+แบตช่วยบ้านวันนี้:** {{ states(''sensor.solar_load_offset_today_kwh'') }} kWh (ประหยัด **฿{{ states(''sensor.net_solar_savings_today'') }}**) - **สะสมทบรอบบิลนี้ (ตั้งแต่วันที่ 20):** {{ states(''sensor.grid_energy_billing_cycle'') }} kWh (สะสม **฿{{ states(''sensor.grid_cost_billing_cycle'') }}** | หักส่วนลดสิทธิ G1 เหลือ **฿{{ states(''sensor.grid_cost_billing_cycle_pea_net'') }}**)'
+  mode: queued
+- id: quant_bot_webhook_alert
+  alias: 'Quant Bot: แจ้งเตือนการเทรด MT5 & Crypto พร้อมปุ่มควบคุมบนมือถือ (เฉพาะ Ball)'
+  description: รับสัญญาณจาก MT5 EA หรือ Crypto Bot บน NAS แล้วส่งแจ้งเตือนเข้าเฉพาะอุปกรณ์ของ Ball (MooBall & iPad MooBall) ไม่รบกวนบัญชีอื่น
+  trigger:
+    - platform: webhook
+      webhook_id: mt5_quant_bot
+      allowed_methods:
+        - POST
+        - PUT
+      local_only: false
+  action:
+    - service: notify.mobile_app_mooball
+      data:
+        title: '{{ trigger.json.title | default("🤖 Pstack Quant Trading Bot") }}'
+        message: '{{ trigger.json.message | default("มีการอัปเดตสถานะจากบอทเทรด") }}'
+        data:
+          push:
+            sound: default
+          group: quant-trading-bot
+          actions:
+            - action: QUANT_BOT_SCAN_NOW
+              title: 📊 สแกนตลาดตอนนี้
+            - action: QUANT_BOT_PAUSE
+              title: ⏸️ พักบอทชั่วคราว
+            - action: QUANT_BOT_PANIC_CLOSE
+              title: 🚨 ปิดทุกไม้ฉุกเฉิน!
+              destructive: true
+    - service: notify.mobile_app_ipad_mooball
+      data:
+        title: '{{ trigger.json.title | default("🤖 Pstack Quant Trading Bot") }}'
+        message: '{{ trigger.json.message | default("มีการอัปเดตสถานะจากบอทเทรด") }}'
+        data:
+          push:
+            sound: default
+          group: quant-trading-bot
+          actions:
+            - action: QUANT_BOT_SCAN_NOW
+              title: 📊 สแกนตลาดตอนนี้
+            - action: QUANT_BOT_PAUSE
+              title: ⏸️ พักบอทชั่วคราว
+            - action: QUANT_BOT_PANIC_CLOSE
+              title: 🚨 ปิดทุกไม้ฉุกเฉิน!
+              destructive: true
+  mode: queued
+- id: quant_bot_mobile_action_handler
+  alias: 'Quant Bot: รับคำสั่งจากปุ่มกดแจ้งเตือนบนมือถือ (Pause / Close All / Scan)'
+  description: ส่งคำสั่งจากปุ่มแจ้งเตือนบนมือถือกลับไปยังบอทบน NAS และ MT5 ผ่าน MQTT
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+  condition:
+    - condition: template
+      value_template: '{{ trigger.event.data.action in ["QUANT_BOT_SCAN_NOW", "QUANT_BOT_PAUSE", "QUANT_BOT_PANIC_CLOSE"] }}'
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: '{{ trigger.event.data.action == "QUANT_BOT_PAUSE" }}'
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: quant/bot_01/cmd/auto_trading
+                payload: 'OFF'
+                qos: 1
+                retain: true
+        - conditions:
+            - condition: template
+              value_template: '{{ trigger.event.data.action == "QUANT_BOT_PANIC_CLOSE" }}'
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: quant/bot_01/cmd/panic_close
+                payload: PRESS
+                qos: 1
+        - conditions:
+            - condition: template
+              value_template: '{{ trigger.event.data.action == "QUANT_BOT_SCAN_NOW" }}'
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: quant/bot_01/cmd/scan_now
+                payload: PRESS
+                qos: 1
+  mode: queued
+- id: lg_washer_main_cycle_complete
+  alias: 'LG เครื่องซักผ้าหลัก: แจ้งเตือนซักผ้าเสร็จเรียบร้อยแล้ว'
+  description: แจ้งเตือนเข้ามือถือ (MooBall & iPad) และ Persistent Notification ใน HA เมื่อเครื่องซักผ้าหลักซักเสร็จ
+  trigger:
+    - platform: state
+      entity_id: event.ekhruue_ngchakphaa_notification
+      not_to:
+        - unavailable
+        - unknown
+    - platform: state
+      entity_id: sensor.ekhruue_ngchakphaa_current_status
+      to: end
+  condition:
+    - condition: template
+      value_template: "{% if trigger.entity_id == 'sensor.ekhruue_ngchakphaa_current_status' %}\n  {{ trigger.to_state.state == 'end' }}\n{% else %}\n  {{ trigger.to_state.attributes.event_type == 'washing_is_complete' }}\n{% endif %}"
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 300 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: '🧺 เครื่องซักผ้าหลัก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} กรุณานำผ้าไปตากครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: notify.mobile_app_mooball
+      data:
+        title: '🧺 เครื่องซักผ้าหลัก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} กรุณานำผ้าไปตากครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: notify.mobile_app_ipad_mooball
+      data:
+        title: '🧺 เครื่องซักผ้าหลัก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} กรุณานำผ้าไปตากครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: persistent_notification.create
+      data:
+        notification_id: lg_washer_main_completed
+        title: 🧺 เครื่องซักผ้าหลัก ซักเสร็จแล้ว
+        message: '- **เวลาที่เสร็จ:** {{ now().strftime("%H:%M น. (%d/%m/%Y)") }} - **สถานะ:** ซักเสร็จเรียบร้อย กรุณานำผ้าออกจากถังไปตาก'
+  mode: single
+- id: lg_washer_mini_cycle_complete
+  alias: 'LG เครื่องซักผ้าขนาดเล็ก: แจ้งเตือนซักผ้าเสร็จเรียบร้อยแล้ว'
+  description: แจ้งเตือนเข้ามือถือ (MooBall & iPad) และ Persistent Notification ใน HA เมื่อเครื่องซักผ้าขนาดเล็กซักเสร็จ
+  trigger:
+    - platform: state
+      entity_id: event.ekhruue_ngchakphaakhnaadelk_notification
+      not_to:
+        - unavailable
+        - unknown
+    - platform: state
+      entity_id: sensor.ekhruue_ngchakphaakhnaadelk_current_status
+      to: end
+  condition:
+    - condition: template
+      value_template: "{% if trigger.entity_id == 'sensor.ekhruue_ngchakphaakhnaadelk_current_status' %}\n  {{ trigger.to_state.state == 'end' }}\n{% else %}\n  {{ trigger.to_state.attributes.event_type == 'washing_is_complete' }}\n{% endif %}"
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 300 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: '🧺 เครื่องซักผ้าขนาดเล็ก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} นำผ้าออกได้เลยครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: notify.mobile_app_mooball
+      data:
+        title: '🧺 เครื่องซักผ้าขนาดเล็ก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} นำผ้าออกได้เลยครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: notify.mobile_app_ipad_mooball
+      data:
+        title: '🧺 เครื่องซักผ้าขนาดเล็ก: ซักเสร็จแล้ว!'
+        message: รอบการซักเสร็จสมบูรณ์เมื่อ {{ now().strftime("%H:%M น.") }} นำผ้าออกได้เลยครับ
+        data:
+          push:
+            sound: default
+          group: lg-washer-alert
+    - service: persistent_notification.create
+      data:
+        notification_id: lg_washer_mini_completed
+        title: 🧺 เครื่องซักผ้าขนาดเล็ก ซักเสร็จแล้ว
+        message: '- **เวลาที่เสร็จ:** {{ now().strftime("%H:%M น. (%d/%m/%Y)") }} - **สถานะ:** ซักเสร็จเรียบร้อย นำผ้าออกได้เลยครับ'
+  mode: single
+- id: lg_washer_error_alert
+  alias: 'LG เครื่องซักผ้า: แจ้งเตือนข้อผิดพลาด Error (เน้นเตือนน้ำไม่เข้า/แรงดันน้ำตก IE)'
+  description: แจ้งเตือนด่วนพร้อมเสียง Critical เมื่อเครื่องซักผ้ารายงาน Error โดยเฉพาะปัญหาแรงดันน้ำตก/น้ำไม่เข้า (IE), ท่อตัน, ประตูเปิด, ถังแกว่ง
+  trigger:
+    - platform: state
+      entity_id:
+        - event.ekhruue_ngchakphaa_error
+        - event.ekhruue_ngchakphaakhnaadelk_error
+      not_to:
+        - unavailable
+        - unknown
+    - platform: state
+      entity_id:
+        - event.ekhruue_ngchakphaa_notification
+        - event.ekhruue_ngchakphaakhnaadelk_notification
+      attribute: event_type
+      to: error_during_washing
+    - platform: state
+      entity_id:
+        - sensor.ekhruue_ngchakphaa_current_status
+        - sensor.ekhruue_ngchakphaakhnaadelk_current_status
+      to: error
+  condition:
+    - condition: template
+      value_template: '{{ trigger.to_state.state not in [''unavailable'', ''unknown'', ''''] }}'
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 180 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: '🚨 เครื่องซักผ้า LG: ตรวจพบข้อผิดพลาด / น้ำไม่ไหล!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %}\n{% set err = trigger.to_state.attributes.event_type | default(trigger.to_state.state) %}\n{% set err_dict = {\n  'water_supply_error': '\U0001F6B0 น้ำไม่เข้าเครื่อง / แรงดันน้ำต่ำ (Error IE) - ตรวจสอบก๊อกน้ำ ปั๊มน้ำ หรือสายน้ำดีด่วน!',\n  'water_drain_error': '⚠️ น้ำไม่ระบาย / ท่อน้ำทิ้งตัน (Error OE)',\n  'door_open_error': '⚠️ ประตูปิดไม่สนิท (Error dE)',\n  'out_of_balance_error': '⚠️ ผ้ากระจุกตัวไม่สมดุล ถังแกว่ง (Error UE)',\n  'overfill_error': '⚠️ ระดับน้ำล้นถัง (Error FE)',\n  'water_level_sensor_error': '⚠️ เซ็นเซอร์วัดระดับน้ำขัดข้อง (Error PE)',\n  'temperature_sensor_error': '⚠️ เซ็นเซอร์วัดอุณหภูมิขัดข้อง (Error tE)',\n  'locked_motor_error': '⚠️ มอเตอร์ติดขัด / โหลดผ้าหนักเกินไป (Error LE)',\n  'unable_to_lock_error': '⚠️ ระบบล็อกฝาประตูขัดข้อง (Error dE)',\n  'error_during_washing': '\U0001F6A8 ตรวจพบข้อผิดพลาดระหว่างรอบการซัก (สงสัยน้ำไม่ไหลหรือแรงดันน้ำตก)',\n\
+          \  'error': '\U0001F6A8 เครื่องหยุดทำงานเนื่องจากตรวจพบ Error (สงสัยปัญหาน้ำไม่เข้าหรือระบบขัดข้อง)'\n} %}\n{{ machine }}: {{ err_dict.get(err, 'รหัสข้อผิดพลาด: ' ~ err) }}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: notify.mobile_app_mooball
+      data:
+        title: '🚨 เครื่องซักผ้า LG: ตรวจพบข้อผิดพลาด / น้ำไม่ไหล!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %}\n{% set err = trigger.to_state.attributes.event_type | default(trigger.to_state.state) %}\n{% set err_dict = {\n  'water_supply_error': '\U0001F6B0 น้ำไม่เข้าเครื่อง / แรงดันน้ำต่ำ (Error IE) - ตรวจสอบก๊อกน้ำ ปั๊มน้ำ หรือสายน้ำดีด่วน!',\n  'water_drain_error': '⚠️ น้ำไม่ระบาย / ท่อน้ำทิ้งตัน (Error OE)',\n  'door_open_error': '⚠️ ประตูปิดไม่สนิท (Error dE)',\n  'out_of_balance_error': '⚠️ ผ้ากระจุกตัวไม่สมดุล ถังแกว่ง (Error UE)',\n  'overfill_error': '⚠️ ระดับน้ำล้นถัง (Error FE)',\n  'water_level_sensor_error': '⚠️ เซ็นเซอร์วัดระดับน้ำขัดข้อง (Error PE)',\n  'temperature_sensor_error': '⚠️ เซ็นเซอร์วัดอุณหภูมิขัดข้อง (Error tE)',\n  'locked_motor_error': '⚠️ มอเตอร์ติดขัด / โหลดผ้าหนักเกินไป (Error LE)',\n  'unable_to_lock_error': '⚠️ ระบบล็อกฝาประตูขัดข้อง (Error dE)',\n  'error_during_washing': '\U0001F6A8 ตรวจพบข้อผิดพลาดระหว่างรอบการซัก (สงสัยน้ำไม่ไหลหรือแรงดันน้ำตก)',\n\
+          \  'error': '\U0001F6A8 เครื่องหยุดทำงานเนื่องจากตรวจพบ Error (สงสัยปัญหาน้ำไม่เข้าหรือระบบขัดข้อง)'\n} %}\n{{ machine }}: {{ err_dict.get(err, 'รหัสข้อผิดพลาด: ' ~ err) }}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: notify.mobile_app_ipad_mooball
+      data:
+        title: '🚨 เครื่องซักผ้า LG: ตรวจพบข้อผิดพลาด / น้ำไม่ไหล!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %}\n{% set err = trigger.to_state.attributes.event_type | default(trigger.to_state.state) %}\n{% set err_dict = {\n  'water_supply_error': '\U0001F6B0 น้ำไม่เข้าเครื่อง / แรงดันน้ำต่ำ (Error IE) - ตรวจสอบก๊อกน้ำ ปั๊มน้ำ หรือสายน้ำดีด่วน!',\n  'water_drain_error': '⚠️ น้ำไม่ระบาย / ท่อน้ำทิ้งตัน (Error OE)',\n  'door_open_error': '⚠️ ประตูปิดไม่สนิท (Error dE)',\n  'out_of_balance_error': '⚠️ ผ้ากระจุกตัวไม่สมดุล ถังแกว่ง (Error UE)',\n  'overfill_error': '⚠️ ระดับน้ำล้นถัง (Error FE)',\n  'water_level_sensor_error': '⚠️ เซ็นเซอร์วัดระดับน้ำขัดข้อง (Error PE)',\n  'temperature_sensor_error': '⚠️ เซ็นเซอร์วัดอุณหภูมิขัดข้อง (Error tE)',\n  'locked_motor_error': '⚠️ มอเตอร์ติดขัด / โหลดผ้าหนักเกินไป (Error LE)',\n  'unable_to_lock_error': '⚠️ ระบบล็อกฝาประตูขัดข้อง (Error dE)',\n  'error_during_washing': '\U0001F6A8 ตรวจพบข้อผิดพลาดระหว่างรอบการซัก (สงสัยน้ำไม่ไหลหรือแรงดันน้ำตก)',\n\
+          \  'error': '\U0001F6A8 เครื่องหยุดทำงานเนื่องจากตรวจพบ Error (สงสัยปัญหาน้ำไม่เข้าหรือระบบขัดข้อง)'\n} %}\n{{ machine }}: {{ err_dict.get(err, 'รหัสข้อผิดพลาด: ' ~ err) }}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: persistent_notification.create
+      data:
+        notification_id: lg_washer_error_{{ now().strftime("%Y%m%d_%H%M%S") }}
+        title: 🚨 แจ้งเตือนข้อผิดพลาดเครื่องซักผ้า LG
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %}\n{% set err = trigger.to_state.attributes.event_type | default(trigger.to_state.state) %}\n{% set err_dict = {\n  'water_supply_error': '\U0001F6B0 น้ำไม่เข้าเครื่อง / แรงดันน้ำต่ำ (Error IE) - ตรวจสอบปั๊มน้ำหรือก๊อกน้ำด่วน',\n  'water_drain_error': '⚠️ น้ำไม่ระบาย / ท่อน้ำทิ้งตัน (Error OE)',\n  'door_open_error': '⚠️ ประตูปิดไม่สนิท (Error dE)',\n  'out_of_balance_error': '⚠️ ผ้ากระจุกตัวไม่สมดุล ถังแกว่ง (Error UE)',\n  'overfill_error': '⚠️ ระดับน้ำล้นถัง (Error FE)',\n  'water_level_sensor_error': '⚠️ เซ็นเซอร์วัดระดับน้ำขัดข้อง (Error PE)',\n  'temperature_sensor_error': '⚠️ เซ็นเซอร์วัดอุณหภูมิขัดข้อง (Error tE)',\n  'locked_motor_error': '⚠️ มอเตอร์ติดขัด / โหลดผ้าหนักเกินไป (Error LE)',\n  'unable_to_lock_error': '⚠️ ระบบล็อกฝาประตูขัดข้อง (Error dE)',\n  'error_during_washing': '\U0001F6A8 ตรวจพบข้อผิดพลาดระหว่างรอบการซัก (สงสัยน้ำไม่ไหลหรือแรงดันน้ำตก)',\n\
+          \  'error': '\U0001F6A8 เครื่องหยุดทำงานเนื่องจากตรวจพบ Error (สงสัยปัญหาน้ำไม่เข้า)'\n} %}\n- **อุปกรณ์:** {{ machine }}\n- **เวลาที่ตรวจพบ:** {{ now().strftime(\"%H:%M น. (%d/%m/%Y)\") }}\n- **อาการ/ข้อผิดพลาด:** {{ err_dict.get(err, err) }}\n- **คำแนะนำ:** หากเป็น Error IE ให้ตรวจเช็กแรงดันน้ำ ก๊อกน้ำ หรือปั๊มน้ำบ้าน"
+  mode: queued
+- id: lg_washer_paused_stopped_alert
+  alias: 'LG เครื่องซักผ้า: แจ้งเตือนเครื่องหยุดทำงานกลางคัน (Pause ค้าง / น้ำไม่เข้า / ดับกะทันหัน)'
+  description: แจ้งเตือนเมื่อเครื่องซักผ้าหลักหรือขนาดเล็กหยุดชะงัก (Pause) ค้างเกิน 45 วินาที หรือดับกลางคันขณะกำลังซัก (มักเกิดจากแรงดันน้ำตก น้ำไม่เข้า หรือไฟดับ)
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.ekhruue_ngchakphaa_current_status
+        - sensor.ekhruue_ngchakphaakhnaadelk_current_status
+      from:
+        - running
+        - rinsing
+        - spinning
+        - soaking
+        - prewash
+        - detecting
+        - drying
+      to: pause
+      for:
+        seconds: 45
+    - platform: state
+      entity_id:
+        - sensor.ekhruue_ngchakphaa_current_status
+        - sensor.ekhruue_ngchakphaakhnaadelk_current_status
+      from:
+        - running
+        - rinsing
+        - spinning
+        - soaking
+        - prewash
+        - detecting
+        - drying
+      to: power_off
+  condition:
+    - condition: template
+      value_template: '{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 180 }}'
+  action:
+    - service: notify.notify
+      data:
+        title: '⚠️ LG เครื่องซักผ้า: เครื่องหยุดทำงานกลางคัน!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %} {% if trigger.to_state.state == 'pause' %}\n  {{ machine }} หยุดชะงัก (Pause) ค้างเกิน 45 วินาที! หากไม่ได้กดหยุดเอง อาจเกิดจากแรงดันน้ำไม่พอ/น้ำไม่เข้า กรุณาตรวจสอบ\n{% else %}\n  {{ machine }} ดับหรือตัดการทำงานกะทันหันก่อนรอบซักเสร็จสิ้น (Power Off) กรุณาตรวจสอบ\n{% endif %}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: notify.mobile_app_mooball
+      data:
+        title: '⚠️ LG เครื่องซักผ้า: เครื่องหยุดทำงานกลางคัน!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %} {% if trigger.to_state.state == 'pause' %}\n  {{ machine }} หยุดชะงัก (Pause) ค้างเกิน 45 วินาที! หากไม่ได้กดหยุดเอง อาจเกิดจากแรงดันน้ำไม่พอ/น้ำไม่เข้า กรุณาตรวจสอบ\n{% else %}\n  {{ machine }} ดับหรือตัดการทำงานกะทันหันก่อนรอบซักเสร็จสิ้น (Power Off) กรุณาตรวจสอบ\n{% endif %}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: notify.mobile_app_ipad_mooball
+      data:
+        title: '⚠️ LG เครื่องซักผ้า: เครื่องหยุดทำงานกลางคัน!'
+        message: "{% set machine = 'เครื่องซักผ้าขนาดเล็ก' if 'khnaadelk' in trigger.entity_id else 'เครื่องซักผ้าหลัก' %} {% if trigger.to_state.state == 'pause' %}\n  {{ machine }} หยุดชะงัก (Pause) ค้างเกิน 45 วินาที! หากไม่ได้กดหยุดเอง อาจเกิดจากแรงดันน้ำไม่พอ/น้ำไม่เข้า กรุณาตรวจสอบ\n{% else %}\n  {{ machine }} ดับหรือตัดการทำงานกะทันหันก่อนรอบซักเสร็จสิ้น (Power Off) กรุณาตรวจสอบ\n{% endif %}"
+        data:
+          push:
+            sound: critical
+          group: lg-washer-alert
+    - service: persistent_notification.create
+      data:
+        notification_id: lg_washer_stopped_{{ now().strftime("%Y%m%d_%H%M%S") }}
+        title: '⚠️ LG เครื่องซักผ้า: หยุดทำงานกลางคัน'
+        message: '{% set machine = ''เครื่องซักผ้าขนาดเล็ก'' if ''khnaadelk'' in trigger.entity_id else ''เครื่องซักผ้าหลัก'' %} - **อุปกรณ์:** {{ machine }} - **เวลาที่ตรวจพบ:** {{ now().strftime("%H:%M น. (%d/%m/%Y)") }} - **สถานะ:** {{ ''หยุดชะงัก (Pause) ค้างเกิน 45 วินาที - มักเกิดจากแรงดันน้ำตกหรือน้ำไหลไม่ทัน'' if trigger.to_state.state == ''pause'' else ''ดับกะทันหัน (Power Off) กลางคัน'' }} - **คำแนะนำ:** ตรวจเช็คปั๊มน้ำ ก๊อกน้ำ หรือกดปุ่มเริ่มทำงานต่อเมื่อแรงดันน้ำกลับมาปกติ'
+  mode: queued
+
+- id: 'one_shot_battery_recovery_end_0632'
+  alias: 'Solar: จบการชาร์จแบตฟื้นฟูตอนกลางคืน (06:32 น.)'
+  description: 'รันครั้งเดียวเวลา 06:32 น. เพื่อปิด Secondary Priority ปรับกลับเป็น SBU และ OSO สำหรับแดดตอนเช้า แล้วส่งสรุป Notification และปิดการทำงานตัวเอง'
+  trigger:
+    - platform: time
+      at: '06:32:00'
+  action:
+    - service: select.select_option
+      target:
+        entity_id: select.home_energy_em11000_secondary_output_priority
+      data:
+        option: 'OFF'
+    - delay: '00:00:25'
+    - service: select.select_option
+      target:
+        entity_id: select.home_energy_em11000_secondary_charging_priority
+      data:
+        option: 'OFF'
+    - delay: '00:00:25'
+    - service: select.select_option
+      target:
+        entity_id: select.home_energy_em11000_charger_source_priority
+      data:
+        option: 'OSO'
+    - delay: '00:00:25'
+    - service: select.select_option
+      target:
+        entity_id: select.home_energy_em11000_main_output_priority
+      data:
+        option: 'SBU'
+    - service: notify.notify
+      data:
+        title: '☀️ EM11000: สรุปผลการชาร์จฟื้นฟูแบตเตอรี่ (06:32 น.)'
+        message: >-
+          ✅ สลับกลับโหมดปกติเรียบร้อย:
+          - Secondary Schedule: ปิด OFF ทั้ง Output และ Charge
+          - Inverter Mode: Main SBU + OSO (แดดชาร์จเท่านั้น)
+          
+          🔋 ข้อมูลแบตเตอรี่ล่าสุด (06:32 น.):
+          - SOC รวม 8 แพ็ก: {{ states('sensor.huawei_esm_battery_system_total_battery_system_soc') }}%
+          - ความจุคงเหลือ: {{ states('sensor.huawei_esm_battery_system_total_battery_system_remaining_capacity') }} Ah
+          - แรงดันแบตเตอรี่: {{ states('sensor.huawei_esm_battery_system_total_battery_system_voltage') }} V
+          - สถานะเครื่อง: {{ states('sensor.home_energy_em11000_operating_mode') }}
+        data:
+          push:
+            sound: default
+          group: solar-recovery-report
+    - service: persistent_notification.create
+      data:
+        notification_id: 'solar_battery_recovery_end_0632'
+        title: '☀️ สรุปจบการชาร์จฟื้นฟูแบตเตอรี่ EM11000 (06:32)'
+        message: >-
+          - **สถานะ:** ปิด Secondary Schedule เรียบร้อย และตั้ง Main SBU + OSO
+          - **Huawei Bank SOC:** {{ states('sensor.huawei_esm_battery_system_total_battery_system_soc') }}%
+          - **ความจุคงเหลือ:** {{ states('sensor.huawei_esm_battery_system_total_battery_system_remaining_capacity') }} Ah
+          - **แรงดันระบบ:** {{ states('sensor.huawei_esm_battery_system_total_battery_system_voltage') }} V
+    - service: automation.turn_off
+      target:
+        entity_id:
+          - automation.solar_cchbkaarchaarcchaebtfuuenfuut_nklaangkhuuen_06_32_n
+  mode: single
+
+- id: 'system_weekly_recorder_purge_repack'
+  alias: 'System: Weekly Database Auto-Purge & Repack'
+  description: 'Shrinks SQLite home-assistant_v2.db every Sunday at 04:30 AM to reclaim disk space'
+  trigger:
+    - platform: time
+      at: '04:30:00'
+  condition:
+    - condition: time
+      weekday:
+        - sun
+  action:
+    - action: recorder.purge
+      data:
+        keep_days: 3
+        repack: true
+  mode: single

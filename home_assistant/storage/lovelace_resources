@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "lovelace_resources",
+  "data": {
+    "items": [
+      {
+        "id": "5b79cd772c1f489182337620ffc159ec",
+        "url": "/local/community/sunsynk-power-flow-card/sunsynk-power-flow-card.js?v=613588535758",
+        "type": "module"
+      },
+      {
+        "id": "09b4da9fbfc849ef981e646dda482e32",
+        "url": "/local/community/power-flow-card-plus/power-flow-card-plus.js?v=618081815037",
+        "type": "module"
+      },
+      {
+        "id": "8c5ac23c69e14e12b6356a8ecfcf9b73",
+        "url": "/local/community/lovelace-mushroom/mushroom.js?v=444350375523",
+        "type": "module"
+      },
+      {
+        "id": "31785177d9b248599ae66a8cd5448938",
+        "url": "/local/community/sensor-bar-card-plus/sensor-bar-card-plus.js?v=1183027678191",
+        "type": "module"
+      },
+      {
+        "id": "a1784b9874bc4000bd59fefe1c5dee4e",
+        "url": "/local/community/apexcharts-card/apexcharts-card.js?v=331701152223",
+        "type": "module"
+      },
+      {
+        "id": "42c3805c59d148dcbacdd3b550270707",
+        "url": "/local/community/lovelace-entity-progress-card/entity-progress-card.js?v=908868522163",
+        "type": "module"
+      },
+      {
+        "id": "d09a52efc77748c18f957678d54d6289",
+        "url": "/local/community/solar-bar-card/solar-bar-card.js?v=1067072299306",
+        "type": "module"
+      }
+    ]
+  }
+}

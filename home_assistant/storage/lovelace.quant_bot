@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "lovelace.quant_bot",
+  "data": {
+    "config": {
+      "title": "Pstack Quant Trading Center",
+      "views": [
+        {
+          "title": "Quant Bot Control",
+          "path": "default_view",
+          "icon": "mdi:robot-industrial",
+          "badges": [],
+          "cards": [
+            {
+              "type": "markdown",
+              "content": "## 🤖 Pstack Quant Trading Control Center (MT5 & Crypto)\nระบบควบคุมและติดตามบอทเทรดอัตโนมัติเชื่อมตรงกับ **NAS AI Bridge (`192.168.8.158:11499`)** และ **MetaTrader 5 / Binance**"
+            },
+            {
+              "type": "entities",
+              "title": "🎛️ รีโมทควบคุมบอทฉุกเฉิน (Remote Control & Kill-Switch)",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "switch.pstack_quant_trading_bot_auto_trading_master_switch",
+                  "name": "Auto-Trading Master Switch (เปิด/พักบอท)"
+                },
+                {
+                  "entity": "button.pstack_quant_trading_bot_force_market_scan_now",
+                  "name": "สั่งสแกนตลาดและส่งแจ้งเตือนเข้ามือถือทันที (Scan Now)"
+                },
+                {
+                  "entity": "button.pstack_quant_trading_bot_emergency_close_all_positions",
+                  "name": "🚨 ปุ่มฉุกเฉิน: ปิดทุกออเดอร์และหยุดบอท (PANIC CLOSE ALL)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_active_quant_signal",
+                  "name": "สถานะสัญญาณตลาดล่าสุด (Active Signal)"
+                }
+              ]
+            },
+            {
+              "type": "glance",
+              "title": "💰 พอร์ตและผลกำไร (MT5 / Crypto Portfolio & Goal)",
+              "columns": 4,
+              "entities": [
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_account_balance",
+                  "name": "Balance"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_account_equity",
+                  "name": "Equity"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_daily_profit_loss",
+                  "name": "กำไรวันนี้ (PnL)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_open_positions_count",
+                  "name": "ออเดอร์ที่ถืออยู่"
+                }
+              ]
+            },
+            {
+              "type": "gauge",
+              "entity": "sensor.pstack_quant_trading_bot_rtx_3060_fund_progress",
+              "name": "🎯 เป้าหมายเก็บกำไรซื้อการ์ดจอ RTX 3060 12GB ($250 Target)",
+              "min": 0,
+              "max": 100,
+              "needle": true,
+              "severity": {
+                "green": 75,
+                "yellow": 30,
+                "red": 0
+              }
+            },
+            {
+              "type": "entities",
+              "title": "📈 ตลาดทองคำ & คริปโต (Live Quant Radar)",
+              "entities": [
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_xauusd_gold_price",
+                  "name": "ราคาทองคำ (XAUUSD)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_xauusd_quant_score",
+                  "name": "XAUUSD Quant Score (-100 ถึง +100)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_xauusd_atr_mt5_points",
+                  "name": "XAUUSD ATR (MT5 Points สำหรับตั้ง SL/TP)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_btcusdt_price",
+                  "name": "ราคา Bitcoin (BTCUSDT)"
+                },
+                {
+                  "entity": "sensor.pstack_quant_trading_bot_btcusdt_quant_score",
+                  "name": "BTCUSDT Quant Score (-100 ถึง +100)"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
