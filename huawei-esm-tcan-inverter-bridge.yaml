@@ -130,10 +130,19 @@ canbus:
                   id(pylon_emu).ping_telemetry();
                 }
               }
-      # Frame 0x35F: Remote Wake Command for Pack 8 (from Board 108 Auto-Equalizer)
+      # Frame 0x35F: Remote Equalizer / Wake Command for Pack 8 (from Board 108 Auto-Equalizer)
       - can_id: 0x35F
         then:
-          - script.execute: wake_pack8_script
+          - lambda: |-
+              uint8_t fm3 = (x.size() >= 4) ? x[3] : 1;
+              uint16_t dcoef = (x.size() >= 6) ? (uint16_t)(x[4] | (x[5] << 8)) : 1000;
+              if (dcoef < 15) dcoef = 15;
+              if (dcoef > 1000) dcoef = 1000;
+              g_eq_disch_coef[7] = dcoef;
+              g_eq_chg_coef[7] = 1000;
+              g_eq_force_mode3[7] = fm3;
+              g_eq_cmd_pending[7] = true;
+              ESP_LOGW("auto_equalizer", "CAN 0x35F RX -> Pack 8 slot queued: 0x100B=%u, force_m3=%u", dcoef, fm3);
       # Frame 0x356: Voltage (0.01V), Current (0.1A signed), Temp (0.1°C signed), MinPackV (0.01V)
       - can_id: 0x356
         then:
@@ -232,7 +241,16 @@ interval:
             struct sockaddr_in src_addr;
             socklen_t socklen = sizeof(src_addr);
             int len = ::recvfrom(udp_sock, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &socklen);
-            if (len >= 12 && buf[0] == 0xAA && buf[1] == 0x55) {
+            if (len >= 4 && buf[0] == 0xAA && buf[1] == 0x57 && buf[2] == 0x4B && buf[3] == 0x08) {
+              uint8_t fm3 = (len >= 5) ? buf[4] : 1;
+              uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
+              if (dcoef < 15) dcoef = 15;
+              if (dcoef > 1000) dcoef = 1000;
+              g_eq_disch_coef[7] = dcoef;
+              g_eq_chg_coef[7] = 1000;
+              g_eq_force_mode3[7] = fm3;
+              g_eq_cmd_pending[7] = true;
+            } else if (len >= 12 && buf[0] == 0xAA && buf[1] == 0x55) {
               uint16_t soc = buf[2] | (buf[3] << 8);
               uint16_t soh = buf[4] | (buf[5] << 8);
               int16_t v_raw = (int16_t)(buf[6] | (buf[7] << 8));
@@ -323,10 +341,12 @@ interval:
             id(li2_auto_calibrated_sensor).publish_state(esphome::pylontech_emulator::g_li2_auto_calibrated_100);
           }
 
-          // Broadcast Pack 8 Summary + Real 15-Cell Voltages over CAN Bus to Board 108 (Staggered every 500ms)
+          // Broadcast Pack 8 Summary + Real 15-Cell Voltages + BusbarV/Mode over CAN Bus to Board 108 (Staggered every 500ms)
           static uint8_t pack8_tx_step = 0;
           if (is_pack_fresh(7, 30000)) {
-            uint8_t step = pack8_tx_step++ % 5;
+            float pbus8 = id(pack8_busbar_voltage).state;
+            float pmode8 = id(pack8_bms_operating_mode).state;
+            uint8_t step = pack8_tx_step++ % 6;
             if (step == 0) {
               float pv = id(pack8_battery_voltage).state;
               float pi = id(pack8_current).state;
@@ -335,6 +355,8 @@ interval:
               float pt = id(pack8_max_cell_temp).state;
               if (std::isfinite(pv) && std::isfinite(psoc)) {
                 uint16_t v_100 = (uint16_t)(pv * 100.0f);
+                uint16_t bus_v_100 = (std::isfinite(pbus8) && pbus8 > 20.0f) ? (uint16_t)(pbus8 * 100.0f) : v_100;
+                uint8_t mode_u8 = std::isfinite(pmode8) ? (uint8_t)pmode8 : 2;
                 int16_t i_100 = (int16_t)(pi * 100.0f);
                 uint8_t soc_u8 = (uint8_t)psoc;
                 uint8_t soh_u8 = std::isfinite(psoh) ? (uint8_t)psoh : 100;
@@ -353,14 +375,16 @@ interval:
                 p8_pkt.magic = ESPNOW_P8_MAGIC;
                 p8_pkt.is_online = 1;
                 p8_pkt.voltage_x100 = (int16_t)v_100;
+                p8_pkt.busbar_v_x100 = (int16_t)bus_v_100;
                 p8_pkt.current_x10 = (int16_t)(pi * 10.0f);
                 p8_pkt.soc_x10 = (int16_t)(psoc * 10.0f);
                 p8_pkt.temp_x10 = t_10;
                 p8_pkt.min_cell_mv = p8_cmin;
                 p8_pkt.max_cell_mv = p8_cmax;
+                p8_pkt.op_mode = mode_u8;
                 espnow_broadcast_pack8_summary(p8_pkt);
               }
-            } else {
+            } else if (step <= 4) {
               // step 1..4 -> CAN ID 0x359..0x35C (4 cells per frame in mV, last slot of 0x35C = min_temp_x10)
               int base_c = (step - 1) * 4;
               uint16_t w[4] = {0, 0, 0, 0};
@@ -384,6 +408,33 @@ interval:
                   (uint8_t)(w[3] & 0xFF), (uint8_t)((w[3] >> 8) & 0xFF)
                 };
                 id(interconnect_can_bus).send_data(0x358 + step, false, dcell);
+              }
+            } else {
+              // step 5 -> CAN ID 0x35D: Pack 8 Busbar Voltage (0.01V), BMS Operating Mode, Total Discharged Energy (Wh)
+              float pv = id(pack8_battery_voltage).state;
+              uint16_t bus_v_100 = (std::isfinite(pbus8) && pbus8 > 20.0f) ? (uint16_t)(pbus8 * 100.0f) : (std::isfinite(pv) ? (uint16_t)(pv * 100.0f) : 0);
+              uint16_t mode_u16 = std::isfinite(pmode8) ? (uint16_t)pmode8 : 2;
+              float dis_wh_f = id(pack8_total_discharged_energy).state;
+              uint32_t dis_wh = (std::isfinite(dis_wh_f) && dis_wh_f >= 0.0f) ? (uint32_t)dis_wh_f : 0;
+              if (bus_v_100 > 2000) {
+                std::vector<uint8_t> d35d = {
+                  (uint8_t)(bus_v_100 & 0xFF), (uint8_t)((bus_v_100 >> 8) & 0xFF),
+                  (uint8_t)(mode_u16 & 0xFF), (uint8_t)((mode_u16 >> 8) & 0xFF),
+                  (uint8_t)(dis_wh & 0xFF), (uint8_t)((dis_wh >> 8) & 0xFF),
+                  (uint8_t)((dis_wh >> 16) & 0xFF), (uint8_t)((dis_wh >> 24) & 0xFF)
+                };
+                id(interconnect_can_bus).send_data(0x35D, false, d35d);
+              }
+            }
+
+            // Local Autonomous Equalizer Fallback for Pack 8 (protects Pack 8 sharing even if CAN 0x35F is delayed)
+            float sys_i = id(can_battery_current).state;
+            if (std::isfinite(sys_i) && std::isfinite(pv8) && std::isfinite(pi8) && std::isfinite(psoc8)) {
+              uint8_t m8 = std::isfinite(pmode8) ? (uint8_t)pmode8 : 2;
+              bool p8_disch_clamped = (sys_i <= -8.0f && psoc8 > 18.0f && pv8 > 47.5f && (m8 != 3 || pi8 > (sys_i / 8.0f) * 0.45f));
+              bool p8_chg_clamped = (sys_i >= 16.0f && psoc8 < 95.0f && pv8 < 53.2f && pi8 < (sys_i / 8.0f) * 0.45f);
+              if ((p8_disch_clamped || p8_chg_clamped) && g_eq_disch_coef[7] == 1000) {
+                id(wake_pack8_script).execute();
               }
             }
           }
@@ -514,21 +565,25 @@ script:
             lambda: 'return true;'
           then:
             - lambda: 'id(huawei_esm_pack8).update();'
-            - delay: 5000ms
+            - delay: 3200ms
+            - lambda: |-
+                exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                               esphome::modbus_controller::ModbusCommandItem>(7, id(huawei_esm_pack8));
+            - delay: 1800ms
 
   - id: wake_pack8_script
     mode: single
     then:
-      - script.stop: modbus_pack8_polling
-      - delay: 300ms
-      - logger.log:
-          level: WARN
-          format: ">>> [AUTO-EQUALIZER] Waking Pack 8 (0xD6 on Port 2)..."
-      - uart.write:
-          id: uart_port2_18_25
-          data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94]
-      - delay: 500ms
-      - script.execute: modbus_pack8_polling
+      - lambda: |-
+          static uint32_t s_last_p8_wake_ms = 0;
+          if (s_last_p8_wake_ms != 0 && (millis() - s_last_p8_wake_ms < 20000)) {
+            return;
+          }
+          s_last_p8_wake_ms = millis();
+          g_eq_disch_coef[7] = 1000;
+          g_eq_chg_coef[7] = 1000;
+          g_eq_force_mode3[7] = 1;
+          g_eq_cmd_pending[7] = true;
 
 # ------------------------------------------------------------------------------
 # Status LED (WS2812 RGB LED on GPIO 4)
@@ -695,6 +750,20 @@ sensor:
   # ----------------------------------------------------------------------------
   - platform: modbus_controller
     modbus_controller_id: huawei_esm_pack8
+    name: "Pack 8 Busbar Voltage"
+    id: pack8_busbar_voltage
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    accuracy_decimals: 2
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack8
     name: "Pack 8 Battery Voltage"
     id: pack8_battery_voltage
     register_type: holding
@@ -773,6 +842,15 @@ sensor:
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack8
+    name: "Pack 8 BMS Operating Mode"
+    id: pack8_bms_operating_mode
+    register_type: holding
+    address: 0x000E
+    value_type: U_WORD
+    accuracy_decimals: 0
 
   - platform: modbus_controller
     modbus_controller_id: huawei_esm_pack8

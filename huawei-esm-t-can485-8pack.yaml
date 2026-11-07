@@ -162,7 +162,9 @@ canbus:
                 }
 
                 id(pack8_battery_voltage).publish_state(v);
-                id(pack8_busbar_voltage).publish_state(v);
+                if (isnan(id(pack8_busbar_voltage).state)) {
+                  id(pack8_busbar_voltage).publish_state(v);
+                }
                 id(pack8_current).publish_state(i);
                 id(pack8_state_of_charge).publish_state(soc);
                 id(pack8_state_of_health).publish_state(soh);
@@ -171,7 +173,9 @@ canbus:
                   id(pack8_min_cell_temp).publish_state(temp);
                 }
                 id(pack8_nominal_capacity).publish_state(100.0f);
-                id(pack8_bms_operating_mode).publish_state(2);
+                if (isnan(id(pack8_bms_operating_mode).state)) {
+                  id(pack8_bms_operating_mode).publish_state(2);
+                }
 
                 // Only seed fallback cell voltages if real cell frames (0x359..0x35C) have not arrived yet
                 if (isnan(id(pack8_cell_01_voltage).state)) {
@@ -239,6 +243,24 @@ canbus:
                 if (c14 > 1500 && c14 < 4500) id(pack8_cell_14_voltage).publish_state(c14 * 0.001f);
                 if (c15 > 1500 && c15 < 4500) id(pack8_cell_15_voltage).publish_state(c15 * 0.001f);
                 if (tmin_raw > -400 && tmin_raw < 1000) id(pack8_min_cell_temp).publish_state(tmin_raw * 0.1f);
+              }
+      # Frame 0x35D: Pack 8 Real Busbar Voltage (0.01V), BMS Operating Mode, Total Discharged Energy (Wh)
+      - can_id: 0x35D
+        then:
+          - lambda: |-
+              if (x.size() >= 8) {
+                uint16_t bus_v_raw = x[0] | (x[1] << 8);
+                uint16_t mode_raw = x[2] | (x[3] << 8);
+                uint32_t dis_wh = (uint32_t)x[4] | ((uint32_t)x[5] << 8) | ((uint32_t)x[6] << 16) | ((uint32_t)x[7] << 24);
+                if (bus_v_raw > 2000 && bus_v_raw < 6500) {
+                  id(pack8_busbar_voltage).publish_state(bus_v_raw * 0.01f);
+                }
+                if (mode_raw <= 10) {
+                  id(pack8_bms_operating_mode).publish_state(mode_raw);
+                }
+                if (dis_wh > 0) {
+                  id(pack8_total_discharged_energy).publish_state((float)dis_wh);
+                }
               }
 
 interval:
@@ -311,15 +333,19 @@ interval:
           if (!is_pack_fresh(7, 3000) && (millis() - g_last_espnow_p8_rx_ms < 3000)) {
             if (g_espnow_p8_rx.is_online) {
               float p8_v = (float)g_espnow_p8_rx.voltage_x100 * 0.01f;
+              float p8_bus = (g_espnow_p8_rx.busbar_v_x100 > 2000) ? ((float)g_espnow_p8_rx.busbar_v_x100 * 0.01f) : p8_v;
               float p8_i = (float)g_espnow_p8_rx.current_x10 * 0.1f;
               float p8_soc = (float)g_espnow_p8_rx.soc_x10 * 0.1f;
               float p8_temp = (float)g_espnow_p8_rx.temp_x10 * 0.1f;
               mark_pack_rx_fresh(7);
               id(pack8_battery_voltage).publish_state(p8_v);
-              id(pack8_busbar_voltage).publish_state(p8_v);
+              id(pack8_busbar_voltage).publish_state(p8_bus);
               id(pack8_current).publish_state(p8_i);
               id(pack8_state_of_charge).publish_state(p8_soc);
               id(pack8_max_cell_temp).publish_state(p8_temp);
+              if (g_espnow_p8_rx.op_mode <= 10) {
+                id(pack8_bms_operating_mode).publish_state(g_espnow_p8_rx.op_mode);
+              }
             }
           }
 
@@ -500,31 +526,161 @@ interval:
           }
           tcan_broadcast_telemetry(cyd_pkt);
 
-          // Autonomous Equalizer: If ANY pack discharges > 6.0A (pi <= -6.0A) while other packs are resting (pj > -2.0A),
-          // wake all packs (1 to 8) to assist and distribute the load. Cooldown: 60s.
+          // Smart Active Current Equalizer & Mode-3 Synchronizer (RAM 0x100B / 0x100D / 0x000E / 0xB798):
+          // 1. Discharge Imbalance: If total discharge <= -6.0A and any pack hogs current (< fair_share * 1.60 and <= -5.5A)
+          //    while other usable packs (SOC > 18%, V > 47.5V) are stuck in Mode 2 or lagging (< 45% of fair share),
+          //    throttle the hogging pack's RAM Discharge Limit Coef (0x100B) to force a slight busbar dip (~0.3V)
+          //    that forward-biases sleeping packs into Mode 3 (Discharge), while sending 0x100B=1000 & Mode 3 to lagging packs.
+          // 2. Restore: Automatically restore 0x100B=1000 (100A) once load sharing equalizes or discharge ends.
+          // 3. Solar Charge Imbalance: Ensure 0x100D=1000 & 0x100B=1000 on any pack lagging during solar charging (>= +12.0A).
           static uint32_t s_last_auto_equalize_ms = 0;
-          int overloaded_pack = -1;
-          float max_discharge_i = 0.0f;
-          bool any_sleeping = false;
+          esphome::sensor::Sensor* p_mode[8] = {
+            id(pack1_bms_operating_mode), id(pack2_bms_operating_mode), id(pack3_bms_operating_mode), id(pack4_bms_operating_mode),
+            id(pack5_bms_operating_mode), id(pack6_bms_operating_mode), id(pack7_bms_operating_mode), id(pack8_bms_operating_mode)
+          };
 
-          for (int idx = 0; idx < 8; idx++) {
-            if (!p_mon[idx]->state) continue;
-            float pi = p_i[idx]->state;
-            if (std::isfinite(pi)) {
-              if (pi <= -6.0f && pi < max_discharge_i) {
-                overloaded_pack = idx + 1;
-                max_discharge_i = pi;
+          if (s_last_auto_equalize_ms == 0 || (millis() - s_last_auto_equalize_ms > 12000)) {
+            float total_i = 0.0f;
+            int usable_disch = 0;
+            int sleeping_m2 = 0;
+            int lagging_disch = 0;
+            int lead_disch_pack = -1;
+            float min_pi = 0.0f;
+            int lead_chg_pack = -1;
+            float max_pi = 0.0f;
+
+            for (int idx = 0; idx < 8; idx++) {
+              uint32_t max_age = (idx == 7) ? 30000 : 90000;
+              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+              float pi = p_i[idx]->state;
+              float pv = p_v[idx]->state;
+              float psoc = p_soc[idx]->state;
+              if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
+              total_i += pi;
+              if (psoc > 18.0f && pv > 47.5f) {
+                usable_disch++;
               }
-              if (pi > -2.0f) {
-                any_sleeping = true;
+              if (pi < min_pi) {
+                min_pi = pi;
+                lead_disch_pack = idx + 1;
+              }
+              if (pi > max_pi) {
+                max_pi = pi;
+                lead_chg_pack = idx + 1;
               }
             }
-          }
 
-          if (overloaded_pack > 0 && any_sleeping && (millis() - s_last_auto_equalize_ms > 60000)) {
-            s_last_auto_equalize_ms = millis();
-            ESP_LOGW("auto_equalizer", "Pack %d discharge overload (%.1fA) while others resting. Triggering auto-wake...", overloaded_pack, max_discharge_i);
-            id(auto_wake_sleeping_packs).execute();
+            float fair_disch_i = (usable_disch > 0) ? (total_i / (float)usable_disch) : 0.0f;
+            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f) {
+              for (int idx = 0; idx < 8; idx++) {
+                uint32_t max_age = (idx == 7) ? 30000 : 90000;
+                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+                float pi = p_i[idx]->state;
+                float pv = p_v[idx]->state;
+                float psoc = p_soc[idx]->state;
+                float pmd = p_mode[idx]->state;
+                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 18.0f || pv <= 47.5f) continue;
+                int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
+                if (mode_int != 3) sleeping_m2++;
+                if (pi > (fair_disch_i * 0.50f) || mode_int != 3) lagging_disch++;
+              }
+            }
+
+            uint8_t cmd_mask = 0;
+            // Case A: Discharge Imbalance / Sleeping Packs
+            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f && (sleeping_m2 > 0 || lagging_disch > 0)) {
+              for (int idx = 0; idx < 8; idx++) {
+                uint32_t max_age = (idx == 7) ? 30000 : 90000;
+                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+                float pi = p_i[idx]->state;
+                float pv = p_v[idx]->state;
+                float psoc = p_soc[idx]->state;
+                float pmd = p_mode[idx]->state;
+                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 18.0f || pv <= 47.5f) continue;
+                int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
+
+                if (pi <= -5.5f && pi < (fair_disch_i * 1.55f)) {
+                  // This pack is hogging the discharge load: throttle 0x100B (Discharge Limit Coef) in RAM
+                  uint16_t throttle_coef = 20; // 0.020C = 2.0A when other packs are stuck in Mode 2 to force busbar dip & wake
+                  if (sleeping_m2 == 0) {
+                    float target_a = std::max(3.0f, (-fair_disch_i) * 1.15f);
+                    throttle_coef = (uint16_t)std::min(1000.0f, target_a * 10.0f);
+                  }
+                  g_eq_disch_coef[idx] = throttle_coef;
+                  g_eq_chg_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 0;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                } else if (mode_int != 3 || pi > (fair_disch_i * 0.55f) || g_eq_last_disch_coef[idx] < 1000) {
+                  // This pack is sleeping (Mode 2) or lagging: open 0x100B=1000 (100A), 0x100D=1000, and force Mode 3
+                  g_eq_disch_coef[idx] = 1000;
+                  g_eq_chg_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 1;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                }
+              }
+            } else {
+              // Restore any previously throttled pack back to 1000 (100A) when balanced or idle/charging
+              for (int idx = 0; idx < 8; idx++) {
+                if (g_eq_last_disch_coef[idx] < 1000) {
+                  g_eq_disch_coef[idx] = 1000;
+                  g_eq_chg_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 0;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                }
+              }
+            }
+
+            // Case B: Solar Charge Imbalance (Lead pack >= +12.0A)
+            if (lead_chg_pack > 0 && max_pi >= 12.0f) {
+              for (int idx = 0; idx < 8; idx++) {
+                uint32_t max_age = (idx == 7) ? 30000 : 90000;
+                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+                float pi = p_i[idx]->state;
+                float pv = p_v[idx]->state;
+                float psoc = p_soc[idx]->state;
+                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
+                if (psoc >= 95.0f || pv >= 53.2f) continue;
+                if (pi < (max_pi * 0.45f) && pi < 6.5f) {
+                  g_eq_disch_coef[idx] = 1000;
+                  g_eq_chg_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 1;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                }
+              }
+            }
+
+            if (cmd_mask != 0) {
+              s_last_auto_equalize_ms = millis();
+              ESP_LOGW("auto_equalizer",
+                       "Equalizer active (Total=%.1fA, Fair=%.1fA, Lead=P%d:%.1fA, SleepM2=%d). Mask=0x%02X",
+                       total_i, fair_disch_i, lead_disch_pack, min_pi, sleeping_m2, cmd_mask);
+              if (cmd_mask & (1U << 7)) {
+                uint16_t c8 = g_eq_disch_coef[7];
+                uint8_t fm3 = g_eq_force_mode3[7];
+                g_eq_last_disch_coef[7] = c8;
+                g_eq_cmd_pending[7] = false;
+                std::vector<uint8_t> d_wake = {
+                  0x57, 0x4B, 0x08, fm3,
+                  (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF)
+                };
+                id(interconnect_can_bus).send_data(0x35F, false, d_wake);
+                if (s_udp_109 >= 0) {
+                  struct sockaddr_in w_addr = {};
+                  w_addr.sin_family = AF_INET;
+                  w_addr.sin_port = htons(18888);
+                  w_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
+                  uint8_t wpkt[7] = {
+                    0xAA, 0x57, 0x4B, 0x08, fm3,
+                    (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF)
+                  };
+                  ::sendto(s_udp_109, wpkt, sizeof(wpkt), 0, (struct sockaddr *)&w_addr, sizeof(w_addr));
+                }
+              }
+            }
           }
 
 modbus:
@@ -736,49 +892,78 @@ script:
                 then:
                   - lambda: 'id(huawei_esm_pack1).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(0, id(huawei_esm_pack1));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack2_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack2).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(1, id(huawei_esm_pack2));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack3_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack3).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(2, id(huawei_esm_pack3));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack4_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack4).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(3, id(huawei_esm_pack4));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack5_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack5).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(4, id(huawei_esm_pack5));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack6_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack6).update();'
                   - script.execute: flash_activity_led
-                  - delay: 5000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(5, id(huawei_esm_pack6));
+                  - delay: 1800ms
             - if:
                 condition:
                   lambda: 'return id(pack7_monitor).state;'
                 then:
                   - lambda: 'id(huawei_esm_pack7).update();'
                   - script.execute: flash_activity_led
-            - delay: 1000ms
+                  - delay: 3200ms
+                  - lambda: |-
+                      exec_huawei_bms_equalizer_slot<esphome::modbus_controller::ModbusController,
+                                                     esphome::modbus_controller::ModbusCommandItem>(6, id(huawei_esm_pack7));
+                  - delay: 1800ms
+            - delay: 200ms
 
   # --- ESN/BarCode Reader for Pack 4 (Isolated Bus on uart_pack4, Slave ID 0xD6) ---
   - id: read_esn_pack4
@@ -866,49 +1051,20 @@ script:
   #     - delay: 500ms
   #     - script.execute: modbus_polling_loop
 
-  # --- Autonomous Equalizer: Wake Sleeping Packs When ANY Pack Overloaded ---
+  # --- Autonomous Equalizer: Wake Sleeping Packs (Time-Slot Synchronized) ---
   - id: auto_wake_sleeping_packs
     mode: single
     then:
-      - script.stop: modbus_polling_loop
-      - delay: 300ms
-      - logger.log:
-          level: WARN
-          format: ">>> [AUTO-EQUALIZER] Discharge overload (>6A)! Waking all sleeping packs..."
-      - uart.write:
-          id: uart_bms
-          data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 1
-      - delay: 300ms
-      - uart.write:
-          id: uart_bms
-          data: [0xD7, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x45] # Pack 2
-      - delay: 300ms
-      - uart.write:
-          id: uart_bms
-          data: [0xD8, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0xBA] # Pack 3
-      - delay: 300ms
-      - uart.write:
-          id: uart_pack4
-          data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 4
-      - delay: 300ms
-      - uart.write:
-          id: uart_bms
-          data: [0xD9, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x6B] # Pack 5
-      - delay: 300ms
-      - uart.write:
-          id: uart_bms
-          data: [0xDA, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x58] # Pack 6
-      - delay: 300ms
-      - uart.write:
-          id: uart_bms
-          data: [0xDB, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x89] # Pack 7
-      - delay: 300ms
       - lambda: |-
-          // Pack 8 is on Board 109 Port 2 (0xD6): send CAN 0x35F wake command to Board 109
-          std::vector<uint8_t> d_wake = {0x57, 0x4B, 0x08, 0x01};
+          ESP_LOGW("auto_equalizer", ">>> [AUTO-EQUALIZER] Flagging all 8 packs for time-slot synchronized Mode-3 wake (0x100B=1000, 0x100D=1000)...");
+          for (int idx = 0; idx < 8; idx++) {
+            g_eq_disch_coef[idx] = 1000;
+            g_eq_chg_coef[idx] = 1000;
+            g_eq_force_mode3[idx] = 1;
+            g_eq_cmd_pending[idx] = true;
+          }
+          std::vector<uint8_t> d_wake = {0x57, 0x4B, 0x08, 0x01, 0xE8, 0x03};
           id(interconnect_can_bus).send_data(0x35F, false, d_wake);
-      - delay: 500ms
-      - script.execute: modbus_polling_loop
 
   # --- ESN/BarCode Reader for ALL Packs ---
   - id: read_esn_all
