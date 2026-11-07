@@ -1,146 +1,99 @@
-# Huawei ESM-48100B1 (8-Pack 38.4 kWh) & Inverter Closed-Loop Integration
+# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.0.0)
 
-[![Hardware: LilyGO T-CAN485](https://img.shields.io/badge/Hardware-LILYGO%20T--CAN485%20(ESP32)-blue.svg)](https://github.com/Xinyuan-LilyGO/T-CAN485)
-[![Framework: ESPHome](https://img.shields.io/badge/Framework-ESPHome-green.svg)](https://esphome.io/)
-[![Protocol: Pylontech CAN & Modbus RTU](https://img.shields.io/badge/Protocol-Pylontech%20CAN%20%7C%20Modbus%20RTU-orange.svg)](#)
-[![Home Assistant: Native Energy Flow](https://img.shields.io/badge/Home%20Assistant-Energy%20Dashboard%20Ready-41BDF5.svg)](https://www.home-assistant.io/)
+[![Release: v5.0.0 Gen 5](https://img.shields.io/badge/Release-v5.0.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
+[![Hardware: Dual LILYGO T-CAN485](https://img.shields.io/badge/Hardware-2x%20LILYGO%20T--CAN485%20(ESP32)-blue.svg)](https://github.com/Xinyuan-LilyGO/T-CAN485)
+[![Framework: ESPHome](https://img.shields.io/badge/Framework-ESPHome%202026.6+-green.svg)](https://esphome.io/)
+[![Protocol: Pylontech LI2 & Modbus RTU](https://img.shields.io/badge/Protocol-Pylontech%20LI2%20%7C%20CAN%20%7C%20ESP--NOW-orange.svg)](#)
+[![Home Assistant: Native Energy Flow](https://img.shields.io/badge/Home%20Assistant-120--Cell%20Dashboard%20Ready-41BDF5.svg)](ha_dashboard_solar_battery_8pack.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power off-grid/hybrid inverters (ANENJI, PowMr, Deye, SRNE, Growatt) using **dual-bus hardware isolation**, **native Pylontech closed-loop CAN emulation (`Li2`)**, and a **zero-latency EyBond VIP transparent bridge**.
+> 📖 **คู่มือฉบับสมบูรณ์ (ภาษาไทย & English):** อ่านรายละเอียดเชิงลึกทั้งหมดได้ที่ **[docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)**
+
+An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power hybrid inverters (**MaxSky / ANENJI / PowMr EM11000 11kW**, Deye, SRNE, Growatt) using **dual-node multi-bus hardware isolation**, **2-Stage Back-EMF Parallel Balancing (`v6.5.0-PRO`)**, **Tri-Redundant Interconnect (CAN + Direct Unicast UDP + ESP-NOW)**, and **Active Discharge Load Equalization**.
 
 ---
 
-## ⚡ Core Engineering Breakthroughs
+## 🆕 What's New in v5.0.0 (Gen 5 Release)
 
-1. **8-Pack Parallel Huawei ESM-48100B1 Telemetry (120 Cells):**
-   * Reads cell voltages, individual pack currents, SOH, internal resistance, alarms, and temperatures simultaneously.
-   * **Pack 4 Address Collision Fix (ID 214):** Huawei ESM modules often carry fixed factory firmware locking Pack 4 to ID 214 (`0xD6`). This setup uses dual isolated RS485 transceivers on the LilyGO T-CAN485, creating a dedicated isolated bus for Pack 4 **without altering DIP switches on live, busbar-connected batteries**.
-   * **Deterministic Modbus Pacing:** Custom C++ Accessor tuning (`frame_delay: 250ms`, `long_rx_delay: 350ms`) guarantees 100% collision-free polling across all 8 modules.
-
-2. **Native Pylontech CAN Bus Emulator (`Li2` Closed-Loop):**
-   * Embedded C++ TWAI driver (`stitched_pylontech_emulator.h`) running on ESP32 broadcasts standard Pylontech protocol frames (`0x351`, `0x355`, `0x356`, `0x359`, `0x35C`, `0x35E`) at 500 kbps.
-   * Dynamically calculates **Charge Current Limit (CCL)** and **Discharge Current Limit (DCL)** based on lowest/highest pack voltages and cell temperatures, enforcing closed-loop inverter protection.
-
-3. **Absorption Voltage Clamping (Equalized Multi-Pack Full Charging):**
-   * Eliminates the classic multi-pack starvation issue when charging at high current (100A-140A) near full SOC.
-   * When the strongest cell across the 120 cells reaches 3.50V, the emulator clamps Target Charge Voltage (CV) to 53.4V (relaxing current throttling) instead of choking the entire bank's CCL down to 10A-15A.
-   * Fully charged packs naturally taper charging current to 0A ($I = \Delta V / R$), while trailing packs continue charging at full speed until all 8 packs reach equilibrium without tripping BMS cell-overvoltage protection.
-
-4. **Tri-Redundant Interconnect Link (CAN + Direct UDP + ESP-NOW):**
-   * **Primary:** TWAI CAN Bus (500 kbps) transmitting telemetry frames `0x355`, `0x356`, `0x358`, `0x359-0x35C`.
-   * **Secondary:** Direct UDP point-to-point packet streaming over Wi-Fi.
-   * **Tertiary (Zero-Dependency Failover):** Direct peer-to-peer ESP-NOW broadcast (`EspNowBmsPacket` and `EspNowPack8Packet`) with CRC checksum. Operates independently even if the home router or Wi-Fi AP reboots. If CAN frames stall for >2000ms, ESP-NOW seamlessly takes over telemetry injection to prevent inverter timeouts.
-
-5. **EyBond Wi-Fi Datalogger VIP Transparent Bridge (Port 502):**
-   * Resolves the vendor lock-in of EyBond/SmartESS Wi-Fi data loggers.
-   * Discovered the true EyBond server endpoint is **TCP Port 502** (`vip1.eybond.com:502`), not port 18899 (which is an AT cellular terminal that drops connections after 15 seconds).
-   * Proxies binary Modbus frames to the cloud so the **official SmartESS mobile app remains 100% functional** while Home Assistant intercepts telemetry locally at 2.5s intervals.
-   * **Guarded UDP Watchdog:** Sends zero-configuration LAN signals (`set>server=<HA_IP>:8899;\r\n` to port 58899) to recover the logger within 1.5 seconds if the home router reboots at 04:00 AM. **Requires zero router modification, zero DNS spoofing, and no OpenWrt/pfSense.**
-
-6. **Real-Time Battery Load Sharing Lovelace Dashboard:**
-   * High-density Home Assistant UI featuring live power flow, dynamic pack current ranking, cell drift analysis, and exact Thai PEA TOU tiered electricity cost calculations.
+| Module / Component | File | Version | Key Gen 5 Enhancements |
+| :--- | :--- | :---: | :--- |
+| **Node 108 (BMS 8-Pack Master)** | [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) | **`v6.5.0`** | Full 120-cell Max/Min sync across CAN (`0x355`), Direct Unicast UDP (`18888`/`5005`), & ESP-NOW (`0x454E`); Cross-Node CAN (`0x35F`) Auto-Wake for Pack 8; true per-pack bitmask (`online_mask`) |
+| **Node 109 (Inverter Bridge & Logger)** | [`huawei-esm-tcan-inverter-bridge.yaml`](huawei-esm-tcan-inverter-bridge.yaml) | **`v1.3.0`** | Dedicated Pack 8 isolated polling & CAN/ESP-NOW backhaul (`0x358..0x35C`); CAN `0x35F` remote wake handler (`wake_pack8_script`); MicroSD 1s CSV datalogger |
+| **Pylontech LI2 Closed-Loop Engine** | [`components_v4/pylontech_emulator/pylontech_emulator.h`](components_v4/pylontech_emulator/pylontech_emulator.h) | **`v6.5.0-PRO`** | **2-Stage Parallel Balancing (`52.5V` → `52.8V`)** with **Asymmetric Voltage Slew-Rate Limiter** (`+0.1V/5s` up, `-0.2V/1s` down); non-latching `g_reported_max_cell_mv`; direction-aware `DCL` throttling status |
+| **Shared Telemetry Protocol** | [`tcan_telemetry_shared.h`](tcan_telemetry_shared.h) | **`v5.0.0`** | Direct Unicast UDP `5005` streaming to both Node 109 (`192.168.8.109`) and CYD Display (`192.168.8.110`) + zero-router ESP-NOW checksummed packets |
+| **Home Assistant 120-Cell Dashboard** | [`ha_dashboard_solar_battery_8pack.yaml`](ha_dashboard_solar_battery_8pack.yaml) | **`v5.0.0`** | Live online/offline indicators for isolated buses (Pack 4 & Pack 8), dynamic multi-threshold color-coded SOC/Current/Power cards, and hardware-accurate DIP Slave IDs |
 
 ---
 
-## 📐 System Architecture
+## ⚡ Core Engineering Breakthroughs (สรุปจุดเด่นทางวิศวกรรม)
+
+1. **8-Pack Parallel Huawei ESM-48100B1 Telemetry (120 Cells) & Dual Isolated Buses:**
+   * Polls all 8 packs (120 cells, individual pack currents, SOH, temperatures, and alarms) without changing physical DIP switches on locked `ID 214 (0xD6)` modules:
+     * **Node 108 Port 1 (`GPIO 33/32`):** Pack 1 (`0xD6`), Pack 2 (`0xD7`), Pack 3 (`0xD8`), Pack 5 (`0xD9`), Pack 6 (`0xDA`), Pack 7 (`0xDB`)
+     * **Node 108 Port 2 (`GPIO 18/25`):** Isolated RS485 bus for **Pack 4 (`0xD6`)**
+     * **Node 109 Port 2 (`GPIO 18/25`):** Isolated RS485 bus for **Pack 8 (`0xD6`)**, backhauled to Node 108 via CAN (`0x358..0x35C`) and ESP-NOW (`0x5038`)
+
+2. **Continuous 2-Stage Back-EMF Parallel Balancing (`52.5V` → `52.8V` CV Clamp + `120A` Wide-Open CCL):**
+   * Eliminates multi-pack starvation where one leading pack (e.g., Pack 4) hits `>= 3.48V/cell` early while lagging packs (e.g., Pack 1) are still `< 3.40V/cell`.
+   * **Stage 1 (`52.5V` / `120A`):** Clamps the inverter busbar target voltage to `52.5V` (`3.50V/cell` avg) while keeping Charge Current Limit (CCL) wide open at `120.0A`. Full packs naturally float via Back-EMF (`< 1A`), while hungry packs absorb full solar power.
+   * **Stage 2 (`52.8V` / `100A`):** Smoothly bridges busbar target voltage to `52.8V` when `min_cell` enters `3400–3425 mV`, governed by an **Asymmetric Voltage Slew-Rate Limiter** (`+0.1V / 5s` step-up, `-0.2V / 1s` step-down) to prevent MPPT current surges.
+
+3. **Active Discharge Load Equalization & Cross-Node CAN `0x35F` Auto-Wake:**
+   * Monitors inter-pack voltage delta (`>= 0.25V / 0.35V`) and per-pack discharge current delta, tapering DCL to `80A–100A` to protect individual packs from overload.
+   * If any pack discharges `<= -6.0A` while another pack is sleeping (`> -2.0A`), Node 108 automatically sends Modbus wake frames (`0x06` Reg `0x101B = 100A`) to Packs 1–7 and transmits **CAN Frame `0x35F`** to Node 109 to wake Pack 8 (`wake_pack8_script`).
+
+4. **Tri-Redundant Interconnect Link (CAN + Direct Unicast UDP + ESP-NOW):**
+   * **Primary:** TWAI CAN Bus (500 kbps) transmitting `0x355` (SOC, SOH, MinCell, MaxCell), `0x356` (SysV, SysI, Temp, MinPackV), `0x358..0x35C` (Pack 8 15-cell backhaul), and `0x35F` (Remote Wake).
+   * **Secondary:** Direct Unicast UDP streaming on Port `18888` (18-byte summary) and Port `5005` (full 8-pack / 120-cell `TcanTelemetryPacket`).
+   * **Tertiary:** Zero-router-dependency **ESP-NOW** broadcast (`0x454E` & `0x5038`) with <2000ms automatic hot-failover.
+
+5. **EyBond Wi-Fi Datalogger VIP Transparent Bridge (Port 502 / 8899):**
+   * Local Home Assistant triage bridge (`custom_components/em11000_bridge`) providing 2.5s–3.0s local Dual-MPPT telemetry while keeping the official SmartESS / DessMonitor cloud app 100% functional.
+
+---
+
+## 📐 System Architecture (Gen 5 Dual-Node Topology)
 
 ```
-                                  48V DC High-Capacity Busbar (38.4 kWh)
-    ┌────────────────────────────────────────────────────────────────────────────────────────┐
-    │                                                                                        │
-  Pack 1 (ID 1)  Pack 2 (ID 2)  Pack 3 (ID 3)  Pack 5 (ID 5)  Pack 6 (ID 6)  Pack 7 (ID 7)  Pack 8 (ID 8)  Pack 4 (ID 214)
-    │              │              │              │              │              │              │               │
-    └──────────────┴──────────────┴──────┬───────┴──────────────┴──────────────┴──────────────┘               │ (Dedicated Bus)
-                                         │ RS485 Main Bus (9600 8E1)                                          │ RS485 Isolated Bus
-                                         ▼                                                                    ▼
-                            ┌────────────────────────┐                                          ┌────────────────────────┐
-                            │ Isolated RS485 Module  │                                          │ Isolated RS485 Module  │
-                            │ (Blue / GPIO 33 & 32)  │                                          │ (Red / GPIO 18 & 25)   │
-                            └───────────┬────────────┘                                          └───────────┬────────────┘
-                                        │                                                                   │
-                                        └─────────────────────┐               ┌─────────────────────────────┘
-                                                              ▼               ▼
-                                                   ┌─────────────────────────────────────┐
-                                                   │   LILYGO T-CAN485 Controller (ESP32)│ (e.g. <DEVICE_IP>)
-                                                   │  - ESPHome Modbus Pacing Engine     │
-                                                   │  - Pylontech CAN Emulator (TWAI)    │
-                                                   └──────────────────┬──────────────────┘
-                                                                      │ CAN_H / CAN_L (500 kbps)
-                                                                      ▼
-                                                   ┌─────────────────────────────────────┐
-                                                   │     11kW Hybrid Inverter (Li2)      │
-                                                   │  (ANENJI / PowMr / Deye BMS Port)   │
-                                                   └──────────────────┬──────────────────┘
-                                                                      │ RS232 / Datalogger Port
-                                                                      ▼
-                                                   ┌─────────────────────────────────────┐
-                                                   │ EyBond Wi-Fi Datalogger (.166:58899)│
-                                                   └──────────────────┬──────────────────┘
-                                                                      │ Local LAN TCP :8899
-                                                                      ▼
-                                                   ┌─────────────────────────────────────┐
-                                                   │ Home Assistant Triage Bridge (v2.0) │
-                                                   │ - 3.0s Live Dual-MPPT Triage (0ms)  │
-                                                   │ - PV1 & PV2 Independent Telemetry   │
-                                                   │ - Guarded UDP Auto-Recovery Watchdog│
-                                                   └──────────────────┬──────────────────┘
-                                                                      │ Upstream TCP :18899
-                                                                      ▼
-                                                   ┌─────────────────────────────────────┐
-                                                   │ China VIP Cloud (vip1.eybond.com)   │
-                                                   │ (SmartESS / DessMonitor App 100% OK)│
-                                                   └─────────────────────────────────────┘
+                                  48V DC High-Capacity Busbar (800Ah / 38.4 kWh / 120 Cells)
+    ┌───────────────────────────┬───────────────────────────────────────────────┬───────────────────────────┐
+    │                           │                                               │                           │
+  Packs 1,2,3,5,6,7         Pack 4 (ID 214 / 0xD6)                          Pack 8 (ID 214 / 0xD6)      11kW Hybrid Inverter
+  (0xD6..0xD8, 0xD9..0xDB)  (Isolated Bus Port 2)                           (Isolated Bus Port 2)       (MaxSky EM11000)
+    │                           │                                               │                           ▲
+    ▼ (GPIO 33/32)              ▼ (GPIO 18/25)                                  ▼ (GPIO 18/25)              │ RS232 Pylontech LI2
+┌─────────────────────────────────────────┐                                 ┌───────────────────────────────┴───────────┐
+│ Node 108: BMS Master (192.168.8.108)    │  1. CAN Bus 500kbps (GPIO27/26) │ Node 109: Inverter Bridge (192.168.8.109) │
+│ - Deterministic 8-Pack Modbus Engine    │◄───────────────────────────────►│ - Pylontech LI2 Emulator (v6.5.0-PRO)     │
+│ - 120-Cell Max/Min Aggregator           │  2. Direct Unicast UDP 5005/18888│ - 2-Stage Parallel Balancing (52.5->52.8V)│
+│ - Auto-Equalizer & CAN 0x35F Wake TX    │◄───────────────────────────────►│ - Asymmetric Voltage & Current Slew-Rate  │
+│ - v6.5.0 Firmware                       │  3. ESP-NOW Failover (<2000ms)   │ - v1.3.0 Firmware + MicroSD CSV Logger    │
+└─────────────────────────────────────────┘                                 └───────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ Hardware Requirements
+## 🚀 Quick Start & OTA Flashing
 
-| Component | Description | Purpose |
-| :--- | :--- | :--- |
-| **LILYGO T-CAN485** | ESP32 board with native CAN transceiver & RS485 | Master controller running ESPHome & TWAI CAN |
-| **Galvanic Isolated RS485** | High-speed 3.3V/5V TTL to RS485 modules (Auto Direction) | Eliminates ground loops between battery bank & inverter |
-| **RJ45 Splitters & Cat6** | Standard 8P8C twisted pair cables | Pin 1/4 = RS485-A (+), Pin 2/3 = RS485-B (-), Pin 7/8 = CAN |
-| **Huawei ESM-48100B1** | 48V 100Ah LiFePO4 Telecom Battery Packs (Up to 8 units) | Primary energy storage |
-| **Hybrid Inverter** | ANENJI ANJ-HHS-11KW / PowMr POW-HVM11KP or compatible | Dual-MPPT 48V hybrid inverter |
+### 1. Configure Wi-Fi Credentials
+Edit `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` in [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) and [`huawei-esm-tcan-inverter-bridge.yaml`](huawei-esm-tcan-inverter-bridge.yaml) (or use the git-ignored `*-prod.yaml` files for production deployments).
 
----
-
-## 🚀 Quick Start Guide
-
-### 1. Flash ESPHome Firmware
-Copy `tcan_telemetry_shared.h` and `huawei-esm-t-can485-8pack.yaml` into your ESPHome directory:
+### 2. Compile & Upload Firmware
 ```bash
+# Node 109: Inverter Bridge & Pack 8 Controller (v1.3.0)
+esphome compile huawei-esm-tcan-inverter-bridge.yaml
+esphome upload --device 192.168.8.109 huawei-esm-tcan-inverter-bridge.yaml
+
+# Node 108: 8-Pack BMS Master Controller (v6.5.0)
 esphome compile huawei-esm-t-can485-8pack.yaml
-esphome upload huawei-esm-t-can485-8pack.yaml --device <DEVICE_IP>
+esphome upload --device 192.168.8.108 huawei-esm-t-can485-8pack.yaml
 ```
 
-### 2. Deploy EyBond VIP Cloud Bridge on Home Assistant (v2.0.0)
-Copy the `custom_components/em11000_bridge` directory to your Home Assistant `/config/custom_components/`:
-```bash
-# Add to configuration.yaml
-em11000_bridge:
-```
-Restart Home Assistant. The bridge will listen on port `8899`, inject 3.0s local Modbus triage (true Dual-MPPT PV1 & PV2), forward to `dess_solar` coordinator, maintain the upstream multiplexing link to `vip1.eybond.com:18899`, and auto-recover the plug if your router reboots.
-
-For the full architectural breakdown, register map, and setup guide, see [docs/SMARTESS_EYBOND_LOCAL_TRIAGE_BRIDGE_GUIDE.md](docs/SMARTESS_EYBOND_LOCAL_TRIAGE_BRIDGE_GUIDE.md).
-
-### 3. Verify Live Telemetry
-Open Home Assistant -> **Developer Tools** -> **States**:
-* `sensor.huawei_esm_battery_system_total_battery_system_voltage` (e.g., `48.4 V`)
-* `sensor.huawei_esm_battery_system_total_battery_system_current` (e.g., `-36.5 A`)
-* `sensor.huawei_esm_battery_system_total_battery_system_soc` (e.g., `85%`)
-* `sensor.home_energy_em11000_bridge_status` (`Connected`)
-
----
-
-## 📊 Live Dashboard Preview
-
-The repository includes ready-to-import Lovelace dashboards featuring:
-* **Sunsynk Power Flow Card:** Dual-MPPT strings, battery power flow, grid bypass, and inverter efficiency.
-* **Real-Time Load Sharing Table:** Live current and power ranking showing which packs are carrying the highest charge or discharge current.
-* **120-Cell Drilldown:** Max/Min cell voltage delta tracking down to 1 mV precision.
-* **PEA Step-Rate Billing Meter:** Accurate calculation of Thai provincial electricity authority bills.
+### 3. Documentation & Runbooks
+* 📘 **[Bilingual Gen 5 Engineering & Operations Manual (Thai / English)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)**
+* 📗 **[SmartESS / EyBond Local Triage Bridge Guide](docs/SMARTESS_EYBOND_LOCAL_TRIAGE_BRIDGE_GUIDE.md)**
+* 📙 **[MaxSky EM11000 Home Assistant Integration Guide (TH)](MAXSKY_EM11000_HA_GUIDE_TH.md)**
+* 📕 **[Huawei SMU02C & ESM-48100B1 Pinout & Service Guide (TH)](HUAWEI_SMU02C_ESM48100_PINOUT_SERVICE_GUIDE_TH.md)**
 
 ---
 

@@ -54,6 +54,7 @@ struct BridgeTelemetryPacket {
 inline void tcan_broadcast_telemetry(const TcanTelemetryPacket &pkt) {
   static int tx_sock = -1;
   static struct sockaddr_in cyd_addr;
+  static struct sockaddr_in bridge_addr;
   static struct sockaddr_in bc_addr;
   if (tx_sock < 0) {
     tx_sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
@@ -65,12 +66,18 @@ inline void tcan_broadcast_telemetry(const TcanTelemetryPacket &pkt) {
     cyd_addr.sin_port = htons(TCAN_TELEMETRY_PORT);
     cyd_addr.sin_addr.s_addr = inet_addr("192.168.8.110");
 
+    memset(&bridge_addr, 0, sizeof(bridge_addr));
+    bridge_addr.sin_family = AF_INET;
+    bridge_addr.sin_port = htons(TCAN_TELEMETRY_PORT);
+    bridge_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
+
     memset(&bc_addr, 0, sizeof(bc_addr));
     bc_addr.sin_family = AF_INET;
     bc_addr.sin_port = htons(TCAN_TELEMETRY_PORT);
     bc_addr.sin_addr.s_addr = inet_addr("192.168.8.255");
   }
   ::sendto(tx_sock, &pkt, sizeof(pkt), 0, (struct sockaddr *)&cyd_addr, sizeof(cyd_addr));
+  ::sendto(tx_sock, &pkt, sizeof(pkt), 0, (struct sockaddr *)&bridge_addr, sizeof(bridge_addr));
   ::sendto(tx_sock, &pkt, sizeof(pkt), 0, (struct sockaddr *)&bc_addr, sizeof(bc_addr));
 }
 
@@ -197,6 +204,7 @@ inline bool is_bridge_direct_available() {
 inline uint32_t g_pack_last_rx_ms[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline float g_reported_min_pack_v = 0.0f;
 inline uint16_t g_reported_min_cell_mv = 0;
+inline uint16_t g_reported_max_cell_mv = 0;
 
 inline void mark_pack_rx_fresh(int idx) {
   if (idx >= 0 && idx < 8) {

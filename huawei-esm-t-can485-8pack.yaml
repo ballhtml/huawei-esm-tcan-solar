@@ -1,7 +1,11 @@
 # ==============================================================================
 # ESPHome Configuration for LILYGO T-CAN485 + Huawei ESM-48100B1 BMS (8-Pack Ready)
-# Version: 6.4.0 (Absorption Voltage Clamping + ESP-NOW Tri-Redundant Link)
+# Version: 6.5.0 (Gen 5: 2-Stage Parallel Balancing + Cross-Node CAN 0x35F Auto-Wake)
 # Changelog:
+#   - v6.5.0: Added Tri-Redundant MaxCell/MinCell Sync across CAN (0x355), UDP (18888/5005), & ESP-NOW
+#             Added Cross-Node CAN (0x35F) Auto-Wake command for Pack 8 on Board 109 Port 2
+#             Fixed ESP-NOW online_mask to use true per-pack bitmask (1U << idx)
+#             Added Direct Unicast UDP 5005 delivery to Board 109 (192.168.8.109)
 #   - v6.4.0: Added Absorption Voltage Clamping (CV Clamping at 53.4V on cell >3.50V)
 #             Added Tri-Redundant ESP-NOW Hot-Failover Link (<2000ms stale CAN detection)
 #             Added Pack 8 ESP-NOW summary reception & 120-cell bank max/min cell tracking
@@ -327,6 +331,7 @@ interval:
           float sum_v = 0.0f;
           int active_soc_packs = 0;
           int active_v_packs = 0;
+          uint8_t online_bitmask = 0;
 
           for (int idx = 0; idx < 8; idx++) {
             uint32_t max_age = (idx == 7) ? 30000 : 90000;
@@ -343,6 +348,7 @@ interval:
               if (pv < min_v) min_v = pv;
               sum_v += pv;
               active_v_packs++;
+              online_bitmask |= (uint8_t)(1U << idx);
             }
             for (int c = 0; c < 15; c++) {
               float cv = p_c[idx][c]->state;
@@ -378,13 +384,16 @@ interval:
           float target_v = (min_v <= 46.5f) ? min_v : avg_v;
           uint16_t min_v_100 = (min_v < 90.0f) ? (uint16_t)(min_v * 100.0f) : (uint16_t)(target_v * 100.0f);
           uint16_t send_min_cell = (min_cell_mv < 9000) ? min_cell_mv : 0;
+          uint16_t send_max_cell = (max_cell_mv < 9000) ? max_cell_mv : 0;
 
-          // 0x355: SOC & SOH
+          // 0x355: SOC, SOH, MinCell (mV), MaxCell (mV)
           uint16_t soc_val = (uint16_t)(target_soc + 0.5f);
           uint16_t soh_val = 100;
           std::vector<uint8_t> d355 = {
             (uint8_t)(soc_val & 0xFF), (uint8_t)((soc_val >> 8) & 0xFF),
-            (uint8_t)(soh_val & 0xFF), (uint8_t)((soh_val >> 8) & 0xFF)
+            (uint8_t)(soh_val & 0xFF), (uint8_t)((soh_val >> 8) & 0xFF),
+            (uint8_t)(send_min_cell & 0xFF), (uint8_t)((send_min_cell >> 8) & 0xFF),
+            (uint8_t)(send_max_cell & 0xFF), (uint8_t)((send_max_cell >> 8) & 0xFF)
           };
           id(interconnect_can_bus).send_data(0x355, false, d355);
 
@@ -414,7 +423,7 @@ interval:
             dest_addr.sin_family = AF_INET;
             dest_addr.sin_port = htons(18888);
             dest_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
-            uint8_t pkt[16] = {
+            uint8_t pkt[18] = {
               0xAA, 0x55,
               (uint8_t)(soc_val & 0xFF), (uint8_t)((soc_val >> 8) & 0xFF),
               (uint8_t)(soh_val & 0xFF), (uint8_t)((soh_val >> 8) & 0xFF),
@@ -422,7 +431,8 @@ interval:
               (uint8_t)(i_10 & 0xFF), (uint8_t)((i_10 >> 8) & 0xFF),
               (uint8_t)(t_10 & 0xFF), (uint8_t)((t_10 >> 8) & 0xFF),
               (uint8_t)(min_v_100 & 0xFF), (uint8_t)((min_v_100 >> 8) & 0xFF),
-              (uint8_t)(send_min_cell & 0xFF), (uint8_t)((send_min_cell >> 8) & 0xFF)
+              (uint8_t)(send_min_cell & 0xFF), (uint8_t)((send_min_cell >> 8) & 0xFF),
+              (uint8_t)(send_max_cell & 0xFF), (uint8_t)((send_max_cell >> 8) & 0xFF)
             };
             ::sendto(s_udp_109, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
           }
@@ -432,14 +442,14 @@ interval:
           EspNowBmsPacket espnow_pkt = {};
           espnow_pkt.magic = ESPNOW_BMS_MAGIC;
           espnow_pkt.seq = s_espnow_seq++;
-          espnow_pkt.online_mask = (uint8_t)active_v_packs;
+          espnow_pkt.online_mask = online_bitmask;
           espnow_pkt.sys_soc_x10 = (int16_t)(target_soc * 10.0f);
           espnow_pkt.sys_soh_x10 = (int16_t)(100.0f * 10.0f);
           espnow_pkt.sys_v_x100 = v_100;
           espnow_pkt.sys_i_x10 = i_10;
           espnow_pkt.max_temp_x10 = t_10;
           espnow_pkt.min_cell_mv = send_min_cell;
-          espnow_pkt.max_cell_mv = (max_cell_mv < 9000) ? max_cell_mv : 0;
+          espnow_pkt.max_cell_mv = send_max_cell;
           espnow_pkt.min_pack_v_x100 = min_v_100;
           espnow_broadcast_bms_summary(espnow_pkt);
 
@@ -489,6 +499,33 @@ interval:
             }
           }
           tcan_broadcast_telemetry(cyd_pkt);
+
+          // Autonomous Equalizer: If ANY pack discharges > 6.0A (pi <= -6.0A) while other packs are resting (pj > -2.0A),
+          // wake all packs (1 to 8) to assist and distribute the load. Cooldown: 60s.
+          static uint32_t s_last_auto_equalize_ms = 0;
+          int overloaded_pack = -1;
+          float max_discharge_i = 0.0f;
+          bool any_sleeping = false;
+
+          for (int idx = 0; idx < 8; idx++) {
+            if (!p_mon[idx]->state) continue;
+            float pi = p_i[idx]->state;
+            if (std::isfinite(pi)) {
+              if (pi <= -6.0f && pi < max_discharge_i) {
+                overloaded_pack = idx + 1;
+                max_discharge_i = pi;
+              }
+              if (pi > -2.0f) {
+                any_sleeping = true;
+              }
+            }
+          }
+
+          if (overloaded_pack > 0 && any_sleeping && (millis() - s_last_auto_equalize_ms > 60000)) {
+            s_last_auto_equalize_ms = millis();
+            ESP_LOGW("auto_equalizer", "Pack %d discharge overload (%.1fA) while others resting. Triggering auto-wake...", overloaded_pack, max_discharge_i);
+            id(auto_wake_sleeping_packs).execute();
+          }
 
 modbus:
   - id: modbus_bms
@@ -777,6 +814,102 @@ script:
           format: ">>> ESN READ: Pack 4 read complete!"
       - script.execute: modbus_polling_loop
 
+  # --- Wake BMS Pack 2 (0x101B = 100A) [REMARKED OUT PER PROTOCOL] ---
+  # - id: wake_pack2_bms
+  #   mode: single
+  #   then:
+  #     - script.stop: modbus_polling_loop
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xD7, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x45]
+  #     - delay: 300ms
+  #     - script.execute: modbus_polling_loop
+
+  # --- Wake All BMS Packs 1-8 (0x101B = 100A) [REMARKED OUT PER PROTOCOL] ---
+  # - id: wake_all_bms
+  #   mode: single
+  #   then:
+  #     - script.stop: modbus_polling_loop
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 1
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xD7, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x45] # Pack 2
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xD8, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0xBA] # Pack 3
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_pack4
+  #         data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 4
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xD9, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x6B] # Pack 5
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xDA, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x58] # Pack 6
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xDB, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x89] # Pack 7
+  #     - delay: 300ms
+  #     - uart.write:
+  #         id: uart_bms
+  #         data: [0xDC, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x3E] # Pack 8
+  #     - delay: 500ms
+  #     - script.execute: modbus_polling_loop
+
+  # --- Autonomous Equalizer: Wake Sleeping Packs When ANY Pack Overloaded ---
+  - id: auto_wake_sleeping_packs
+    mode: single
+    then:
+      - script.stop: modbus_polling_loop
+      - delay: 300ms
+      - logger.log:
+          level: WARN
+          format: ">>> [AUTO-EQUALIZER] Discharge overload (>6A)! Waking all sleeping packs..."
+      - uart.write:
+          id: uart_bms
+          data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 1
+      - delay: 300ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD7, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x45] # Pack 2
+      - delay: 300ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD8, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0xBA] # Pack 3
+      - delay: 300ms
+      - uart.write:
+          id: uart_pack4
+          data: [0xD6, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x94] # Pack 4
+      - delay: 300ms
+      - uart.write:
+          id: uart_bms
+          data: [0xD9, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x6B] # Pack 5
+      - delay: 300ms
+      - uart.write:
+          id: uart_bms
+          data: [0xDA, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEF, 0x58] # Pack 6
+      - delay: 300ms
+      - uart.write:
+          id: uart_bms
+          data: [0xDB, 0x06, 0x10, 0x1B, 0x03, 0xE8, 0xEE, 0x89] # Pack 7
+      - delay: 300ms
+      - lambda: |-
+          // Pack 8 is on Board 109 Port 2 (0xD6): send CAN 0x35F wake command to Board 109
+          std::vector<uint8_t> d_wake = {0x57, 0x4B, 0x08, 0x01};
+          id(interconnect_can_bus).send_data(0x35F, false, d_wake);
+      - delay: 500ms
+      - script.execute: modbus_polling_loop
+
   # --- ESN/BarCode Reader for ALL Packs ---
   - id: read_esn_all
     mode: single
@@ -875,6 +1008,20 @@ button:
     icon: "mdi:barcode-scan"
     on_press:
       - script.execute: read_esn_pack4
+
+  # - platform: template
+  #   name: "Wake Pack 2 BMS (0x101B)"
+  #   id: btn_wake_pack2_bms
+  #   icon: "mdi:battery-charging-wireless"
+  #   on_press:
+  #     - script.execute: wake_pack2_bms
+
+  # - platform: template
+  #   name: "Wake All BMS Packs (0x101B)"
+  #   id: btn_wake_all_bms
+  #   icon: "mdi:battery-sync"
+  #   on_press:
+  #     - script.execute: wake_all_bms
 
   - platform: template
     name: "Read All Packs ESN (BarCode)"
