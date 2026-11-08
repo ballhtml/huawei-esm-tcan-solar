@@ -587,8 +587,8 @@ interval:
             }
 
             uint8_t cmd_mask = 0;
-            // Case A: Discharge Imbalance with Actual Sleeping Packs (Mode 2)
-            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f && sleeping_m2 > 0) {
+            // Case A: Discharge Imbalance / Hogging Pack or Sleeping Packs
+            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f && (sleeping_m2 > 0 || lagging_disch > 0)) {
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
                 if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
