@@ -167,7 +167,7 @@
                     "grid_import": "ใช้ไฟหลวง",
                     "grid_export": "ขายไฟ"
                   },
-                  "_cache_bust": 1794060854877
+                  "_cache_bust": 1794106846230
                 },
                 {
                   "cardstyle": "full",
@@ -204,7 +204,7 @@
                     "soc_decimal_places": 1,
                     "energy": 38400,
                     "shutdown_soc": 25,
-                    "shutdown_soc_offgrid": 20,
+                    "shutdown_soc_offgrid": 18,
                     "auto_scale": true,
                     "show_absolute": true,
                     "invert_power": true,
@@ -1534,7 +1534,7 @@
                 {
                   "type": "markdown",
                   "title": "📋 ตารางค่าแนะนำ: แบตเตอรี่ Huawei ESM 15S",
-                  "content": "| พารามิเตอร์ | ค่ามาตรฐาน 15S | วัตถุประสงค์ความปลอดภัย |\n|---|:---:|---|\n| **Bulk Charge** | `54.0 V` | เฉลี่ย 3.60V/Cell (ถนอมเซลล์ ไม่บวม) |\n| **Float Charge** | `53.2 V` | เฉลี่ย 3.54V/Cell (ตัดปัญหา Overcharge) |\n| **Back to Grid** | `50.0 V` | เฉลี่ย 3.33V/Cell (~20-25% SOC สำรอง) |\n| **Low Cut-off** | `46.2 V` | เฉลี่ย 3.08V/Cell (ป้องกันคายประจุลึก) |\n| **Max Current** | `140 A` | แบ่งเข้า 8 แพ็ก เฉลี่ย ~17.5A/แพ็ก เย็นเฉียบ |"
+                  "content": "| พารามิเตอร์ | ค่ามาตรฐาน 15S | วัตถุประสงค์ความปลอดภัย |\n|---|:---:|---|\n| **Bulk Charge** | `54.0 V` | เฉลี่ย 3.60V/Cell (ถนอมเซลล์ ไม่บวม) |\n| **Float Charge** | `53.2 V` | เฉลี่ย 3.54V/Cell (ตัดปัญหา Overcharge) |\n| **Back to Grid** | `50.0 V` | เฉลี่ย 3.33V/Cell (~20-25% SOC สำรอง) |\n| **Low Cut-off** | `46.8 V` | เฉลี่ย 3.12V/Cell (ป้องกันโหลดกระชากทรุด) |\n| **Max Current** | `140 A` | แบ่งเข้า 8 แพ็ก เฉลี่ย ~17.5A/แพ็ก เย็นเฉียบ |"
                 }
               ]
             }

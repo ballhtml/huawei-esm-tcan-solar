@@ -247,15 +247,15 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
 
     // 2. Multi-Layer Discharge Protection & Anti-Hunting Latch:
     //    - Bank Level: System Average SOC <= 20% or System Average Voltage <= 47.5V
-    //    - Hardware Floor: Any pack <= 46.5V or any cell <= 3.000V (prevents Huawei BMS UVP sleep)
-    //    - Anti-Hunting Sag Filter: If in low zone (SOC <= 25% or V <= 48.0V), cut off early if any cell <= 3.020V or pack <= 46.8V
+    //    - Hardware Floor: Any pack <= 46.8V or any cell <= 3.050V (prevents surge sag trip and Huawei BMS UVP sleep)
+    //    - Anti-Hunting Sag Filter: If in low zone (SOC <= 25% or V <= 48.0V), cut off early if any cell <= 3.050V or pack <= 46.8V
     //    - Thermal Cutoff: Max Temp >= 55.0C
     //    - Recovery Hysteresis (when low_cutoff_latched_):
     //        Must charge back to SOC >= 45.0% AND System Voltage >= 49.8V
     //        Weakest pack >= 48.8V, weakest cell >= 3200mV, temp <= 48.0C
-    bool low_sag_trip = (soc <= 25.0f || v <= 48.0f) && ((min_cell > 1500 && min_cell <= 3020) || (min_pack_v > 20.0f && min_pack_v <= 46.8f));
+    bool low_sag_trip = (soc <= 25.0f || v <= 48.0f) && ((min_cell > 1500 && min_cell <= 3050) || (min_pack_v > 20.0f && min_pack_v <= 46.8f));
     bool low_bank_trip = (soc <= 20.0f) || (v <= 47.5f);
-    bool low_pack_trip = (min_pack_v > 20.0f && min_pack_v <= 46.5f) || (min_cell > 1500 && min_cell <= 3000);
+    bool low_pack_trip = (min_pack_v > 20.0f && min_pack_v <= 46.8f) || (min_cell > 1500 && min_cell <= 3050);
     bool high_temp_trip = (temp >= 55.0f);
 
     if (low_bank_trip || low_pack_trip || low_sag_trip || high_temp_trip) {
@@ -851,7 +851,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     info += to_hex_4(chg_limit); // Dynamic Max Charge Current Limit (0.1A)
     info += to_hex_4(55000);  // Module High Voltage Limit: 55.000V
     info += to_hex_4(47000);  // Module Low Voltage Limit: 47.000V
-    info += to_hex_4(46000);  // Module Under Voltage Limit: 46.000V
+    info += to_hex_4(46800);  // Module Under Voltage Limit: 46.800V (Surge Protection Floor)
     info += to_hex_4(3331);   // Discharge High Temp Limit: 60°C
     info += to_hex_4(2631);   // Discharge Low Temp Limit: -10°C
     info += to_hex_4(dis_limit); // Dynamic Max Discharge Current Limit (0.1A)
@@ -986,7 +986,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
 
     std::string info = "";
     info += to_hex_4(chg_v_mv);  // Dynamic Charge Voltage Limit (53.8V -> 53.2V -> 53.0V Float Step-Down)
-    info += to_hex_4(46500);     // Discharge Voltage Cut-off Limit: 46.500V (Matches Working Proven Config)
+    info += to_hex_4(46800);     // Discharge Voltage Cut-off Limit: 46.800V (Surge Protection Floor)
     info += to_hex_4(chg_limit); // Dynamic Charge Current Limit (0.1A)
     info += to_hex_4(dis_limit); // Dynamic Discharge Current Limit (0.1A)
     uint8_t flags = 0x00;

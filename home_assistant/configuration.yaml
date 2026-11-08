@@ -57,11 +57,11 @@ template:
         unit_of_measurement: "%"
         state: 25
 
-      # 3. จุดตัดดับเครื่องป้องกันแบตเตอรี่หมดเกลี้ยง (20%)
+      # 3. จุดตัดดับเครื่องป้องกันแบตเตอรี่หมดเกลี้ยง (18% / 46.8V ป้องกันโหลดกระชากทรุด)
       - name: "Battery Shutdown Offgrid SOC Setting"
         unique_id: battery_shutdown_offgrid_soc_setting
         unit_of_measurement: "%"
-        state: 20
+        state: 18
 
       # 3.1 พลังงานพร้อมจ่ายก่อนตัดเข้าไฟหลวง (Usable Energy to 25% kWh)
       - name: "Battery Usable Energy to 25 Percent kWh"
