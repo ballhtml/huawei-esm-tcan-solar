@@ -93,8 +93,8 @@
   - Integration Method: `Xiaomi Miot Auto` via HACS.
   - Controls: Fans, air purifiers, smart plugs, air conditioning units, and environmental sensors.
 - **Network Routing & Automation:**
-  - Network Router: Cudy Router (`192.168.8.1`) managed via `Z:\cudy\router.py`.
-  - Active Port Forwards on Cudy:
+  - **Network Router:** Cudy WR11000 Multi-Gigabit Wi-Fi 6 Router (`192.168.8.1`), managed via `Z:\cudy\router.py`.
+  - Active Port Forwards on Cudy WR11000:
     - `5000-5001` -> Synology DSM (`192.168.8.158`)
     - `8123` -> Home Assistant (`192.168.8.209`)
     - `9091` -> Transmission Torrent (`192.168.8.158`)
@@ -103,6 +103,22 @@
   - Fallback APs (Emergency recovery only):
     - SSID: `tcan-bridge-ap` / Password: `bms_setup_password`
     - SSID: `tcanesm-ap` / Password: `bms_setup_password`
+
+- **Intelligent Inverter Pump (Prodn / Zhejiang Dafeng) - Home Assistant Integration:**
+  - **Device & App:** Intelligent Inverter Pump (App: `INTELLIGENT INVERTER PUMP` v4.2.7, `com.dafeng.prodn`).
+  - **Internal Hardware:** High-Flying HF-LPT230 Wi-Fi Module communicating with pump inverter board via 4-pin UART (9600 8N1).
+  - **WARRANTY SAFETY INVARIANT (CRITICAL):** NEVER open, solder, or replace the internal HF-LPT230 Wi-Fi module with ESP32 to prevent voiding the manufacturer warranty. All integration must remain strictly non-invasive.
+  - **Integration Architecture:**
+    - **Primary Path (Cloud REST):** Home Assistant REST Sensor & REST Commands querying `http://<devarea>:8081/pass/getState?mac=<MAC>` every 5s and sending controls via `pass/control?mac=<MAC>&data=<HEX>`.
+    - **Telemetry:** Real-time water pressure (`workPressure` bar), target pressure (`setPressure` bar), flow rate (`flow` m³/h), power (`power` W), IPM temperature (`temperature` °C), run state, mode, dry-run alarm (`lackWater`), pipe leak alarm (`leakage`), operating hours, and fault codes (E01..E13).
+    - **Control Commands (3-Byte Hex):**
+      - Set Target Pressure: `03` + Hex(bar * 100 in Little-Endian) e.g. 2.50 bar = `03fa00`
+      - Starting Pressure Ratio: `09` + Hex(0..80%) + `00`
+      - Set Mode: `070000` (Refill / 补水), `070100` (Downward / 下抽), `070200` (Upward / 上抽)
+      - Refill Timer: `0A0100` (1h), `0A0300` (3h), `0A0600` (6h), `0A0C00` (12h)
+      - Toggle Manual/Auto: `080100`
+    - **Local Offline Fallback Path:** Router DNS rewrite on Cudy WR11000 (`admin.prodnzk.com` -> HA IP `192.168.8.209`) with lightweight mock API service in HA, eliminating cloud dependency without opening the pump casing.
+  - **Source Scripts:** `Z:\modbus\scratch\re\inverter_pump\prodn_ha_integration.py` and `homeassistant_configuration.yaml`.
 
 ---
 
@@ -404,6 +420,19 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
   - Removed from View 1 (Cell Diagnostics): Card 0 Subcard 2.
 - Node 108 firmware handles all keepalive / auto-recovery routines autonomously; manual wake buttons are no longer needed on production UI.
 
+
+
+### 12.6 Auto-EEPROM Permanent Unlock & Active Solar Charge Equalizer (Release v5.3.0 - 2026-11-08)
+- **Automatic One-Time Boot EEPROM Unlock (`0x101B = 1000`):**
+  - Resolved factory derating / throttling on Packs 6 & 7 (which were historically capped at +7A to +9A charge current due to default EEPROM settings).
+  - Implemented automatic, non-cyclical one-shot write on boot (`g_eq_eeprom_unlocked[idx]`) in `exec_huawei_bms_equalizer_slot` (`tcan_telemetry_shared.h`).
+  - Writes Modbus Function Code `0x10` and `0x06` to `0x101B` (`Default Charge Limit Coef`) with value `1000` (100.0A) once per boot across all 8 packs (Node 108 & Node 109). Requires zero manual user interaction and permanently saves to battery EEPROM.
+- **Active Solar Charge Equalizer & Current Diversion:**
+  - Case B in `huawei-esm-t-can485-8pack.yaml`: When `total_i >= +6.0A` and leading pack >= 10.0A, any pack with `psoc >= 85.0%` (e.g. Pack 8) is dynamically throttled to `0x100D = 80` (8.0A in RAM).
+  - Prevents leading packs from spiking cell voltages to 3.55V early, which previously clamped the Inverter DC busbar down to 52.5V and starved lagging packs.
+  - Automatically diverts excess MPPT solar current into hungry packs (Packs 2, 4, 6, 7) until balanced, and restores `0x100D = 1000` (100A) when charging completes (`total_i < 2.0A`).
+- **Synchronized CAN 0x35F & UDP Protocol:**
+  - Extended payload to 8-9 bytes: includes `fm3`, `dis_coef` (2 bytes), and `chg_coef` (2 bytes) to coordinate bidirectional charging & discharging equalization across both LilyGO nodes.
 
 ### 12.5 Official Huawei ESM-48100B1 Register Map & Time-Slot Synchronized Active Current Equalizer (2026-11-08)
 - **Decompiled Official Huawei `MaintenanceTool.exe` & `ModbusModule.dll` (`ToolContext.InitBatteryConstDefine` & `SetRegister` `0x10064870`):**

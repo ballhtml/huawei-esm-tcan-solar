@@ -633,8 +633,8 @@ interval:
               }
             }
 
-            // Case B: Solar Charge Imbalance (Lead pack >= +12.0A)
-            if (lead_chg_pack > 0 && max_pi >= 12.0f) {
+            // Case B: Solar Charge Equalizer (Active Solar Balancing & Diversion)
+            if (total_i >= 6.0f && lead_chg_pack > 0 && max_pi >= 10.0f) {
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
                 if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
@@ -642,11 +642,29 @@ interval:
                 float pv = p_v[idx]->state;
                 float psoc = p_soc[idx]->state;
                 if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
-                if (psoc >= 95.0f || pv >= 53.2f) continue;
-                if (pi < (max_pi * 0.45f) && pi < 6.5f) {
+
+                // If this pack is high SoC (>=85%) or cell spiking high and soaking up charge ahead of hungry packs (<75%):
+                if ((psoc >= 85.0f || pv >= 53.0f) && pi >= 8.0f) {
+                  // Throttle charge current to 80 (8.0A) in RAM to divert MPPT amps to hungry packs
+                  g_eq_chg_coef[idx] = 80;
                   g_eq_disch_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 0;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                } else if (psoc < 80.0f && g_eq_last_chg_coef[idx] < 1000) {
+                  // Ensure hungry pack has 100A charge limit wide open
                   g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 1;
+                  g_eq_disch_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 0;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                }
+              }
+            } else if (total_i < 2.0f) {
+              // When charging stops (idle or discharge), restore all charge limits back to 1000 (100A)
+              for (int idx = 0; idx < 8; idx++) {
+                if (g_eq_last_chg_coef[idx] < 1000) {
+                  g_eq_chg_coef[idx] = 1000;
                   g_eq_cmd_pending[idx] = true;
                   cmd_mask |= (uint8_t)(1U << idx);
                 }
@@ -660,12 +678,15 @@ interval:
                        total_i, fair_disch_i, lead_disch_pack, min_pi, sleeping_m2, cmd_mask);
               if (cmd_mask & (1U << 7)) {
                 uint16_t c8 = g_eq_disch_coef[7];
+                uint16_t chg8 = g_eq_chg_coef[7];
                 uint8_t fm3 = g_eq_force_mode3[7];
                 g_eq_last_disch_coef[7] = c8;
+                g_eq_last_chg_coef[7] = chg8;
                 g_eq_cmd_pending[7] = false;
                 std::vector<uint8_t> d_wake = {
                   0x57, 0x4B, 0x08, fm3,
-                  (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF)
+                  (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF),
+                  (uint8_t)(chg8 & 0xFF), (uint8_t)((chg8 >> 8) & 0xFF)
                 };
                 id(interconnect_can_bus).send_data(0x35F, false, d_wake);
                 if (s_udp_109 >= 0) {
@@ -673,9 +694,10 @@ interval:
                   w_addr.sin_family = AF_INET;
                   w_addr.sin_port = htons(18888);
                   w_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
-                  uint8_t wpkt[7] = {
+                  uint8_t wpkt[9] = {
                     0xAA, 0x57, 0x4B, 0x08, fm3,
-                    (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF)
+                    (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF),
+                    (uint8_t)(chg8 & 0xFF), (uint8_t)((chg8 >> 8) & 0xFF)
                   };
                   ::sendto(s_udp_109, wpkt, sizeof(wpkt), 0, (struct sockaddr *)&w_addr, sizeof(w_addr));
                 }

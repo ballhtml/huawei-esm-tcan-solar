@@ -136,13 +136,16 @@ canbus:
           - lambda: |-
               uint8_t fm3 = (x.size() >= 4) ? x[3] : 1;
               uint16_t dcoef = (x.size() >= 6) ? (uint16_t)(x[4] | (x[5] << 8)) : 1000;
+              uint16_t ccoef = (x.size() >= 8) ? (uint16_t)(x[6] | (x[7] << 8)) : 1000;
               if (dcoef < 15) dcoef = 15;
               if (dcoef > 1000) dcoef = 1000;
+              if (ccoef < 20) ccoef = 20;
+              if (ccoef > 1000) ccoef = 1000;
               g_eq_disch_coef[7] = dcoef;
-              g_eq_chg_coef[7] = 1000;
+              g_eq_chg_coef[7] = ccoef;
               g_eq_force_mode3[7] = fm3;
               g_eq_cmd_pending[7] = true;
-              ESP_LOGW("auto_equalizer", "CAN 0x35F RX -> Pack 8 slot queued: 0x100B=%u, force_m3=%u", dcoef, fm3);
+              ESP_LOGW("auto_equalizer", "CAN 0x35F RX -> Pack 8 slot queued: 0x100B=%u, 0x100D=%u, force_m3=%u", dcoef, ccoef, fm3);
       # Frame 0x356: Voltage (0.01V), Current (0.1A signed), Temp (0.1°C signed), MinPackV (0.01V)
       - can_id: 0x356
         then:
@@ -244,10 +247,13 @@ interval:
             if (len >= 4 && buf[0] == 0xAA && buf[1] == 0x57 && buf[2] == 0x4B && buf[3] == 0x08) {
               uint8_t fm3 = (len >= 5) ? buf[4] : 1;
               uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
+              uint16_t ccoef = (len >= 9) ? (uint16_t)(buf[7] | (buf[8] << 8)) : 1000;
               if (dcoef < 15) dcoef = 15;
               if (dcoef > 1000) dcoef = 1000;
+              if (ccoef < 20) ccoef = 20;
+              if (ccoef > 1000) ccoef = 1000;
               g_eq_disch_coef[7] = dcoef;
-              g_eq_chg_coef[7] = 1000;
+              g_eq_chg_coef[7] = ccoef;
               g_eq_force_mode3[7] = fm3;
               g_eq_cmd_pending[7] = true;
             } else if (len >= 12 && buf[0] == 0xAA && buf[1] == 0x55) {

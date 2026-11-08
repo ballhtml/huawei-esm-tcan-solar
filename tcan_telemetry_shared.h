@@ -358,15 +358,18 @@ inline void espnow_broadcast_pack8_summary(EspNowPack8Packet &pkt) {
 // Official Huawei Registers (from MaintenanceTool.exe & ModbusModule.dll):
 //   0x100B: Discharge Limit Coef (RAM, prec=3, unit=C, 1000 = 1.000C = 100A, 25 = 0.025C = 2.5A)
 //   0x100D: Charge Limit Coef    (RAM, prec=3, unit=C, 1000 = 1.000C = 100A)
+//   0x101B: Default Charge Limit Coef (EEPROM, prec=3, unit=C, 1000 = 100A) - One-time boot unlock
 //   0x000E: Module Mode          (2 = Charge, 3 = Discharge)
 //   0xB798: Intelligent Hybrid Constant-Voltage Mode (0 = Disable, 1 = Enable)
 // -----------------------------------------------------------------------------
 inline uint16_t g_eq_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint16_t g_eq_chg_coef[8]   = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint8_t  g_eq_force_mode3[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-inline bool     g_eq_cmd_pending[8] = {false, false, false, false, false, false, false, false};
+inline bool     g_eq_cmd_pending[8] = {true, true, true, true, true, true, true, true};
 inline uint16_t g_eq_last_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
+inline uint16_t g_eq_last_chg_coef[8]   = {0, 0, 0, 0, 0, 0, 0, 0};
 inline uint8_t  g_eq_last_mode_sent[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+inline bool     g_eq_eeprom_unlocked[8] = {false, false, false, false, false, false, false, false};
 
 template <typename TCtrl, typename TCmdItem>
 inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
@@ -380,23 +383,38 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
   uint8_t force_m3 = g_eq_force_mode3[idx];
   g_eq_last_disch_coef[idx] = dis_coef;
 
-  // 1. Official Huawei Function Code 0x10 (Write Multiple Registers) to 0x100B (Discharge Limit Coef in RAM)
+  // 1. One-time EEPROM permanent unlock on boot: Set 0x101B (Default Charge Limit Coef) = 1000 (100.0A)
+  if (!g_eq_eeprom_unlocked[idx]) {
+    g_eq_eeprom_unlocked[idx] = true;
+    std::vector<uint16_t> v_eeprom = {1000};
+    auto cmd_eeprom10 = TCmdItem::create_write_multiple_command(ctrl, 0x101B, 1, v_eeprom);
+    ctrl->queue_command(cmd_eeprom10);
+    auto cmd_eeprom06 = TCmdItem::create_write_single_command(ctrl, 0x101B, 1000);
+    ctrl->queue_command(cmd_eeprom06);
+  }
+
+  // 2. Official Huawei Function Code 0x10 (Write Multiple Registers) to 0x100B (Discharge Limit Coef in RAM)
   std::vector<uint16_t> v_dis = {dis_coef};
   auto cmd_dis10 = TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis);
   ctrl->queue_command(cmd_dis10);
 
-  // 2. Function Code 0x06 fallback for 0x100B
+  // Function Code 0x06 fallback for 0x100B
   auto cmd_dis06 = TCmdItem::create_write_single_command(ctrl, 0x100B, dis_coef);
   ctrl->queue_command(cmd_dis06);
 
-  if (force_m3 && g_eq_last_mode_sent[idx] != 3) {
-    // Only send Mode 3 command ONCE to prevent relay latch chatter
-    g_eq_last_mode_sent[idx] = 3;
-
-    // Ensure Charge Limit Coef (0x100D) = 1000 (100A), Hybrid Constant-Voltage Boost (0xB798) = 0, and Module Mode (0x000E) = 3
+  // 3. Official Huawei Function Code 0x10 to 0x100D (Charge Limit Coef in RAM)
+  if (chg_coef != g_eq_last_chg_coef[idx] || !g_eq_eeprom_unlocked[idx]) {
+    g_eq_last_chg_coef[idx] = chg_coef;
     std::vector<uint16_t> v_chg = {chg_coef};
     auto cmd_chg10 = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
     ctrl->queue_command(cmd_chg10);
+    auto cmd_chg06 = TCmdItem::create_write_single_command(ctrl, 0x100D, chg_coef);
+    ctrl->queue_command(cmd_chg06);
+  }
+
+  // 4. Mode 3 and Hybrid Boost control (single-latch to prevent relay contactor chatter)
+  if (force_m3 && g_eq_last_mode_sent[idx] != 3) {
+    g_eq_last_mode_sent[idx] = 3;
 
     std::vector<uint16_t> v_hyb = {0};
     auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
