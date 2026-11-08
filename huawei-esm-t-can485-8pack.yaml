@@ -557,7 +557,7 @@ interval:
               float psoc = p_soc[idx]->state;
               if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
               total_i += pi;
-              if (psoc > 18.0f && pv > 47.5f) {
+              if (psoc > 25.0f && pv > 48.0f) {
                 usable_disch++;
               }
               if (pi < min_pi) {
@@ -579,7 +579,7 @@ interval:
                 float pv = p_v[idx]->state;
                 float psoc = p_soc[idx]->state;
                 float pmd = p_mode[idx]->state;
-                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 18.0f || pv <= 47.5f) continue;
+                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
                 int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
                 if (mode_int != 3) sleeping_m2++;
                 if (pi > (fair_disch_i * 0.50f) || mode_int != 3) lagging_disch++;
@@ -596,7 +596,7 @@ interval:
                 float pv = p_v[idx]->state;
                 float psoc = p_soc[idx]->state;
                 float pmd = p_mode[idx]->state;
-                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 18.0f || pv <= 47.5f) continue;
+                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
                 int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
 
                 if (pi <= -5.5f && pi < (fair_disch_i * 1.55f)) {

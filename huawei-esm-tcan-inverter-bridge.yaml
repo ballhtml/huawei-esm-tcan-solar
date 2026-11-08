@@ -431,7 +431,7 @@ interval:
             float sys_i = id(can_battery_current).state;
             if (std::isfinite(sys_i) && std::isfinite(pv8) && std::isfinite(pi8) && std::isfinite(psoc8)) {
               uint8_t m8 = std::isfinite(pmode8) ? (uint8_t)pmode8 : 2;
-              bool p8_disch_clamped = (sys_i <= -8.0f && psoc8 > 18.0f && pv8 > 47.5f && (m8 != 3 || pi8 > (sys_i / 8.0f) * 0.45f));
+              bool p8_disch_clamped = (sys_i <= -8.0f && psoc8 > 25.0f && pv8 > 48.0f && (m8 != 3 || pi8 > (sys_i / 8.0f) * 0.45f));
               bool p8_chg_clamped = (sys_i >= 16.0f && psoc8 < 95.0f && pv8 < 53.2f && pi8 < (sys_i / 8.0f) * 0.45f);
               if ((p8_disch_clamped || p8_chg_clamped) && g_eq_disch_coef[7] == 1000) {
                 id(wake_pack8_script).execute();
