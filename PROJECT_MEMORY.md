@@ -33,6 +33,10 @@
 - **Critical Safety Rules:**
   - **NEVER** instruct or require changing DIP switches on active packs without explicit user consent.
   - **Pack 4 Isolation:** Pack 4 hardware address is `214` (`0xD6`). Kept on dedicated isolated RS485 UART channel on Node 108 to eliminate bus collisions with standard IDs (1, 2, 3, 5, 6, 7, 8).
+- **Safety Standby Reserve & Cutoff Floor (Synchronized across Firmware & HA - Nov 2026):**
+  - **Standby Cutoff Floor:** Raised to 25.0% SoC and 48.0V across ESPHome Node 108 & 109 (usable_disch condition) to eliminate sag/surge drops during high-power kitchen spikes.
+  - **HA Usable Reserve Calculation:** sensor.battery_shutdown_soc_setting = 25%, usable formula = (soc - 25) / 100 * total_kwh, emergency reserve = 25% (9.6 kWh out of 38.4 kWh).
+  - **HA Lovelace Cards:** custom:sunsynk-power-flow-card shutdown_soc = 25, custom:solar-bar-card = พร้อมจ่าย (หัก 25% สำรอง), mushroom card = พลังงานพร้อมจ่าย (ถึง 25% สำรอง).
 - **Charging & Protection Thresholds:**
   - Float Voltage: 53.5V (~3.56V/cell)
   - Absorption / Max Voltage: 53.8V (~3.58V/cell)
