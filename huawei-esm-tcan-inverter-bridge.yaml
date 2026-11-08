@@ -137,7 +137,7 @@ canbus:
               uint8_t fm3 = (x.size() >= 4) ? x[3] : 1;
               uint16_t dcoef = (x.size() >= 6) ? (uint16_t)(x[4] | (x[5] << 8)) : 1000;
               uint16_t ccoef = (x.size() >= 8) ? (uint16_t)(x[6] | (x[7] << 8)) : 1000;
-              if (dcoef < 15) dcoef = 15;
+              if (dcoef != 0 && dcoef < 15) dcoef = 15;
               if (dcoef > 1000) dcoef = 1000;
               if (ccoef < 20) ccoef = 20;
               if (ccoef > 1000) ccoef = 1000;
@@ -248,7 +248,7 @@ interval:
               uint8_t fm3 = (len >= 5) ? buf[4] : 1;
               uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
               uint16_t ccoef = (len >= 9) ? (uint16_t)(buf[7] | (buf[8] << 8)) : 1000;
-              if (dcoef < 15) dcoef = 15;
+              if (dcoef != 0 && dcoef < 15) dcoef = 15;
               if (dcoef > 1000) dcoef = 1000;
               if (ccoef < 20) ccoef = 20;
               if (ccoef > 1000) ccoef = 1000;

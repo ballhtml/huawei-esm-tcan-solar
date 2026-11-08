@@ -422,6 +422,19 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
 
 
 
+
+### 12.7 Individual Pack 25% Safety Reserve Standby Cutoff (Release v5.4.0 - 2026-11-09)
+- **Problem Statement:**
+  - Inverter-level 25% cutoff only checks total bank average SoC (which was ~37.7% at 04:00 AM).
+  - Due to intra-bank capacity imbalance, Pack 2 and Pack 4 had drained down to 23% and 21% respectively, while Packs 1 and 8 still had 54%.
+  - The previous equalizer loop skipped packs <= 25% (`continue;`), leaving them to slowly discharge (-1.5A to -2.3A) into the DC busbar.
+- **Solution & Empirical Verification:**
+  - Added Case C in `huawei-esm-t-can485-8pack.yaml`: Any pack with `psoc <= 25.0%` or `pv <= 48.0V` has `g_eq_disch_coef[idx] = 0` (0A DCL) and `g_eq_force_mode3[idx] = 2` (Mode 2 Standby) sent via single-latch.
+  - Verified live on live production hardware at 04:13 AM:
+    * **Pack 2:** Current dropped instantly from -1.47A to **`0.0 A`** (SoC locked at 23.0%)
+    * **Pack 4:** Current dropped instantly from -2.36A to **`0.0 A`** (SoC locked at 21.0%)
+    * Remaining household load (~580W / -12.4A) smoothly transferred to Packs 1, 3, 5, 6, 7, 8 (Pack 8: -4.66A, Pack 5: -2.57A, Pack 1: -1.49A).
+
 ### 12.6 Auto-EEPROM Permanent Unlock & Active Solar Charge Equalizer (Release v5.3.0 - 2026-11-08)
 - **Automatic One-Time Boot EEPROM Unlock (`0x101B = 1000`):**
   - Resolved factory derating / throttling on Packs 6 & 7 (which were historically capped at +7A to +9A charge current due to default EEPROM settings).

@@ -1,6 +1,6 @@
-# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.3.0)
+# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.4.0)
 
-[![Release: v5.2.0 Gen 5](https://img.shields.io/badge/Release-v5.3.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
+[![Release: v5.2.0 Gen 5](https://img.shields.io/badge/Release-v5.4.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
 [![Hardware: Dual LILYGO T-CAN485](https://img.shields.io/badge/Hardware-2x%20LILYGO%20T--CAN485%20(ESP32)-blue.svg)](https://github.com/Xinyuan-LilyGO/T-CAN485)
 [![Framework: ESPHome](https://img.shields.io/badge/Framework-ESPHome%202026.6+-green.svg)](https://esphome.io/)
 [![Protocol: Pylontech LI2 & Modbus RTU](https://img.shields.io/badge/Protocol-Pylontech%20LI2%20%7C%20CAN%20%7C%20ESP--NOW-orange.svg)](#)
@@ -10,6 +10,15 @@
 > 📖 **คู่มือฉบับสมบูรณ์ (ภาษาไทย & English):** อ่านรายละเอียดเชิงลึกทั้งหมดได้ที่ **[docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)**
 
 An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power hybrid inverters (**MaxSky / ANENJI / PowMr EM11000 11kW**, Deye, SRNE, Growatt) using **dual-node multi-bus hardware isolation**, **2-Stage Back-EMF Parallel Balancing (`v6.5.0-PRO`)**, **Tri-Redundant Interconnect (CAN + Direct Unicast UDP + ESP-NOW)**, and **Active Discharge Load Equalization**.
+
+---
+
+## 🆕 What's New in v5.4.0 (Individual Pack 25% Reserve Standby Cutoff Release)
+
+| Module / Component | File | Version | Key Enhancements |
+| :--- | :--- | :---: | :--- |
+| **Individual Pack 25% Reserve Standby** | [`tcan_telemetry_shared.h`](tcan_telemetry_shared.h) & [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) | **`v5.4.0`** | **Immediate zero-current cutoff (`0x100B = 0A`, Mode 2 Standby)** when any individual pack hits `SoC <= 25.0%` or `V <= 48.0V`. Completely eliminates deep over-discharge on leading packs (Pack 2 & Pack 4 verified clamped to **0.0A**), locking emergency reserve until solar recharge |
+| **Hysteresis Recovery (30% Floor)** | [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) | **`v5.4.0`** | Packs in standby only re-engage discharge after recharging to `SoC >= 30.0%`, preventing chatter around the 25% boundary |
 
 ---
 

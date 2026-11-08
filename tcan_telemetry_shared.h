@@ -412,8 +412,9 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     ctrl->queue_command(cmd_chg06);
   }
 
-  // 4. Mode 3 and Hybrid Boost control (single-latch to prevent relay contactor chatter)
-  if (force_m3 && g_eq_last_mode_sent[idx] != 3) {
+  // 4. Operating Mode Control (Mode 3 = Discharge, Mode 2 = Standby/Charge)
+  // Uses single-latch to prevent relay contactor chatter
+  if ((force_m3 == 3 || force_m3 == 1) && g_eq_last_mode_sent[idx] != 3) {
     g_eq_last_mode_sent[idx] = 3;
 
     std::vector<uint16_t> v_hyb = {0};
@@ -423,7 +424,14 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     std::vector<uint16_t> v_m3 = {3};
     auto cmd_m3 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m3);
     ctrl->queue_command(cmd_m3);
-  } else if (!force_m3) {
+  } else if (force_m3 == 2 && g_eq_last_mode_sent[idx] != 2) {
+    // Mode 2: Standby / Sleep cutoff when pack drops below 25% safety reserve floor
+    g_eq_last_mode_sent[idx] = 2;
+
+    std::vector<uint16_t> v_m2 = {2};
+    auto cmd_m2 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m2);
+    ctrl->queue_command(cmd_m2);
+  } else if (force_m3 == 0) {
     g_eq_last_mode_sent[idx] = 0;
   }
 }
