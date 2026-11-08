@@ -40,7 +40,7 @@
 - **Charging & Protection Thresholds:**
   - Float Voltage: 53.5V (~3.56V/cell)
   - Absorption / Max Voltage: 53.8V (~3.58V/cell)
-  - Under-Voltage Cutoff: 44.0V (~2.93V/cell)
+  - Under-Voltage Cutoff (Off-grid Surge Protected): 46.8V (~3.12V/cell / 18% SoC), Minimum Cell Floor: 3.050V (prevents kettle & portable AC inverter trip)
   - Dynamic CCL Clamping: Maximum 140A, throttled down dynamically when highest cell voltage > 3.45V.
 - **Tri-Redundant Failover:**
   - Node 108 & 109 communicate battery telemetry directly over ESP-NOW heartbeats (sub-millisecond latency).
