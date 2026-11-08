@@ -1,6 +1,6 @@
-# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.0.0)
+# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.2.0)
 
-[![Release: v5.0.0 Gen 5](https://img.shields.io/badge/Release-v5.0.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
+[![Release: v5.2.0 Gen 5](https://img.shields.io/badge/Release-v5.2.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
 [![Hardware: Dual LILYGO T-CAN485](https://img.shields.io/badge/Hardware-2x%20LILYGO%20T--CAN485%20(ESP32)-blue.svg)](https://github.com/Xinyuan-LilyGO/T-CAN485)
 [![Framework: ESPHome](https://img.shields.io/badge/Framework-ESPHome%202026.6+-green.svg)](https://esphome.io/)
 [![Protocol: Pylontech LI2 & Modbus RTU](https://img.shields.io/badge/Protocol-Pylontech%20LI2%20%7C%20CAN%20%7C%20ESP--NOW-orange.svg)](#)
@@ -10,6 +10,17 @@
 > 📖 **คู่มือฉบับสมบูรณ์ (ภาษาไทย & English):** อ่านรายละเอียดเชิงลึกทั้งหมดได้ที่ **[docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)**
 
 An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power hybrid inverters (**MaxSky / ANENJI / PowMr EM11000 11kW**, Deye, SRNE, Growatt) using **dual-node multi-bus hardware isolation**, **2-Stage Back-EMF Parallel Balancing (`v6.5.0-PRO`)**, **Tri-Redundant Interconnect (CAN + Direct Unicast UDP + ESP-NOW)**, and **Active Discharge Load Equalization**.
+
+---
+
+## 🆕 What's New in v5.2.0 (Anti-Chatter & Surge Hardening Release)
+
+| Module / Component | File | Version | Key Enhancements |
+| :--- | :--- | :---: | :--- |
+| **Anti-Chatter Single-Latch Engine** | [`tcan_telemetry_shared.h`](tcan_telemetry_shared.h) & [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) | **`v5.2.0`** | **Eliminated relay clicking chatter** permanently via `g_eq_last_mode_sent` single-latch gating and `sleeping_m2 > 0` condition; widened evaluation window to 30s |
+| **Grid Backup Floor (25% Sync)** | [`home_assistant/configuration.yaml`](home_assistant/configuration.yaml) & [`home_assistant/storage/lovelace.home_energy`](home_assistant/storage/lovelace.home_energy) | **`v5.2.0`** | Raised household grid standby cutoff to **`25.0% SoC / 48.0V`** across firmware and HA sensors to eliminate sag on high-power kitchen loads (kettles, rice cookers) |
+| **Off-Grid Surge Hardening Floor** | [`components_v4/pylontech_emulator/pylontech_emulator.h`](components_v4/pylontech_emulator/pylontech_emulator.h) | **`v5.2.0`** | Elevated emergency off-grid cutoff from 46.0V to **`46.8V` (~18% SoC)** and cell floor to **`3.050V`** to provide surge headroom against inrush current from portable air conditioners and boilers |
+| **Home Assistant Lovelace Sync** | [`home_assistant/storage/lovelace.home_energy`](home_assistant/storage/lovelace.home_energy) | **`v5.2.0`** | Real-Time Load Sharing status threshold adjusted to `p.i >= 0.3A` for **🟢 ชาร์จ**, synced usable energy cards and cache busters |
 
 ---
 
