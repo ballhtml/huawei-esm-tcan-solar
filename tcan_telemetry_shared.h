@@ -366,6 +366,7 @@ inline uint16_t g_eq_chg_coef[8]   = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 
 inline uint8_t  g_eq_force_mode3[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline bool     g_eq_cmd_pending[8] = {false, false, false, false, false, false, false, false};
 inline uint16_t g_eq_last_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
+inline uint8_t  g_eq_last_mode_sent[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 template <typename TCtrl, typename TCmdItem>
 inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
@@ -388,7 +389,10 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
   auto cmd_dis06 = TCmdItem::create_write_single_command(ctrl, 0x100B, dis_coef);
   ctrl->queue_command(cmd_dis06);
 
-  if (force_m3) {
+  if (force_m3 && g_eq_last_mode_sent[idx] != 3) {
+    // Only send Mode 3 command ONCE to prevent relay latch chatter
+    g_eq_last_mode_sent[idx] = 3;
+
     // Ensure Charge Limit Coef (0x100D) = 1000 (100A), Hybrid Constant-Voltage Boost (0xB798) = 0, and Module Mode (0x000E) = 3
     std::vector<uint16_t> v_chg = {chg_coef};
     auto cmd_chg10 = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
@@ -401,6 +405,8 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     std::vector<uint16_t> v_m3 = {3};
     auto cmd_m3 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m3);
     ctrl->queue_command(cmd_m3);
+  } else if (!force_m3) {
+    g_eq_last_mode_sent[idx] = 0;
   }
 }
 
