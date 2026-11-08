@@ -15,7 +15,7 @@
     - service: notify.notify
       data:
         title: ⚠️ แบตเตอรี่ใกล้แตะจุดสำรองฉุกเฉิน (32%)
-        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (30%) เพื่อสำรอง 30% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
+        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (25%) เพื่อสำรอง 25% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
         data:
           push:
             sound: default
@@ -23,7 +23,7 @@
     - service: notify.mobile_app_motorola_edge_20_pro
       data:
         title: ⚠️ แบตเตอรี่ใกล้แตะจุดสำรองฉุกเฉิน (32%)
-        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (30%) เพื่อสำรอง 30% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
+        message: 'แบตเตอรี่รวมเหลือ {{ states(''sensor.huawei_esm_battery_system_total_battery_system_soc'') }}% (พร้อมจ่าย {{ states(''sensor.battery_usable_energy_to_30_percent_kwh'') }} kWh) ใกล้แตะเกณฑ์ตัดสลับไปใช้ไฟหลวง (25%) เพื่อสำรอง 25% ({{ states(''sensor.battery_emergency_reserve_30_percent_kwh'') }} kWh) ไว้เผื่อไฟดับ 📍 เซลล์ต่ำสุด: {{ states(''sensor.battery_system_lowest_cell_info'') }} 📍 แพ็กต่ำสุด: {{ states(''sensor.battery_system_lowest_pack_info'') }}'
         data:
           push:
             sound: default

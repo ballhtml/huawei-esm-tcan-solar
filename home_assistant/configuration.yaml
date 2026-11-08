@@ -51,11 +51,11 @@ template:
           {% set active_count = packs | select('gt', 20.0) | list | length %}
           {{ active_count * 4800 }}
 
-      # 2. จุดตัดสลับไปใช้ไฟหลวง (30% สำรองไฟดับ)
+      # 2. จุดตัดสลับไปใช้ไฟหลวง (25% สำรองไฟดับ)
       - name: "Battery Shutdown SOC Setting"
         unique_id: battery_shutdown_soc_setting
         unit_of_measurement: "%"
-        state: 30
+        state: 25
 
       # 3. จุดตัดดับเครื่องป้องกันแบตเตอรี่หมดเกลี้ยง (20%)
       - name: "Battery Shutdown Offgrid SOC Setting"
@@ -63,8 +63,8 @@ template:
         unit_of_measurement: "%"
         state: 20
 
-      # 3.1 พลังงานพร้อมจ่ายก่อนตัดเข้าไฟหลวง (Usable Energy to 30% kWh)
-      - name: "Battery Usable Energy to 30 Percent kWh"
+      # 3.1 พลังงานพร้อมจ่ายก่อนตัดเข้าไฟหลวง (Usable Energy to 25% kWh)
+      - name: "Battery Usable Energy to 25 Percent kWh"
         unique_id: battery_usable_energy_to_30_percent_kwh
         unit_of_measurement: "kWh"
         device_class: energy
@@ -73,21 +73,21 @@ template:
         state: >-
           {% set soc = states('sensor.huawei_esm_battery_system_total_battery_system_soc') | float(0) %}
           {% set total_kwh = (states('sensor.battery_system_total_energy_available_wh') | float(38400)) / 1000 %}
-          {% if soc > 30 %}
-            {{ (((soc - 30) / 100) * total_kwh) | round(2) }}
+          {% if soc > 25 %}
+            {{ (((soc - 25) / 100) * total_kwh) | round(2) }}
           {% else %}
             0.00
           {% endif %}
 
-      # 3.2 พลังงานสำรองกรณีไฟดับฉุกเฉิน (Emergency Backup Reserve kWh = 30%)
-      - name: "Battery Emergency Reserve 30 Percent kWh"
+      # 3.2 พลังงานสำรองกรณีไฟดับฉุกเฉิน (Emergency Backup Reserve kWh = 25%)
+      - name: "Battery Emergency Reserve 25 Percent kWh"
         unique_id: battery_emergency_reserve_30_percent_kwh
         unit_of_measurement: "kWh"
         device_class: energy_storage
         icon: mdi:shield-sun
         state: >-
           {% set total_kwh = (states('sensor.battery_system_total_energy_available_wh') | float(38400)) / 1000 %}
-          {{ (0.30 * total_kwh) | round(2) }}
+          {{ (0.25 * total_kwh) | round(2) }}
 
       # 3.3 ชั่วโมงการใช้งานแบตเตอรี่ที่เหลือ (Battery Hours Remaining)
       - name: "Battery Hours Remaining"
@@ -105,7 +105,7 @@ template:
             0.0
           {% endif %}
 
-      # 3.4 เวลาที่แบตเตอรี่จะลดถึง 30% (Battery Cutoff Projected Time)
+      # 3.4 เวลาที่แบตเตอรี่จะลดถึง 25% (Battery Cutoff Projected Time)
       - name: "Battery Depletion Projected Time"
         unique_id: battery_depletion_projected_time
         icon: mdi:clock-alert-outline
