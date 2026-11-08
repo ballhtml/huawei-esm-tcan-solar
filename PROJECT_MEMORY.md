@@ -125,6 +125,12 @@
 ---
 
 ## 6. Recent Production Milestones & Community Upstream (Nov 2026)
+- **Release v5.2.0 (Gen 5 Anti-Chatter & Surge Hardening - Nov 2026):**
+  - **Anti-Chatter Single-Latch Engine:** Fixed hunting/relay clicking chatter in Huawei BMS packs during afternoon solar/load transitions via single-latch g_eq_last_mode_sent gating, requiring genuine sleeping_m2 > 0, and expanding polling interval to 30s.
+  - **Grid Standby Safety Floor:** Synchronized household standby cutoff to 25% SoC / 48.0V across ESPHome Node 108/109 and Home Assistant (attery_shutdown_soc_setting = 25%, usable energy calculation (soc - 25) / 100 * total_kwh).
+  - **Off-Grid Surge Hardening Floor:** Elevated emergency off-grid cutoff from 46.0V to 46.8V (~18% SoC) and cell floor to 3.050V on both the EM11000 inverter and pylontech_emulator.h to provide surge headroom against kettle and portable AC compressor inrush currents.
+  - **Lovelace Real-Time Load Sharing:** Updated charge threshold to p.i >= 0.3A for active green charging indicator across all 8 parallel packs.
+
 
 - **ha-dessmonitor v2.6.0 (Andreas Glaser):** Official release merged Devcode 6515 (Maxsky EM11000 11kW Dual-MPPT, Eybond WiFi logger FW 3.6.6.6) with full credit to @ballhtml (Issue #57).
 - **Issue #71 (Groove-max / ha-eybond-local):** Delivered 15-hour soak test empirical proof (em11000_15h_soak_test.txt, 6,365 events) demonstrating 2,209 cloud EOF cycles handled with 2,207 auto-reconnects (99.91% success) and zero local telemetry dropouts.
