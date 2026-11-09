@@ -519,19 +519,11 @@ sd_logger:
   power_sensor: can_battery_power
   soc_sensor: can_battery_soc
   temp_sensor: can_battery_temp
-  pack1_soc: can_battery_soc
-  pack1_v: can_battery_voltage
-  pack1_i: can_battery_current
-  pack2_soc: can_battery_soc
-  pack2_v: can_battery_voltage
-  pack2_i: can_battery_current
-  pack3_soc: can_battery_soc
-  pack3_v: can_battery_voltage
-  pack3_i: can_battery_current
-  pack4_soc: can_battery_soc
-  pack4_v: can_battery_voltage
-  pack4_i: can_battery_current
   inverter_queries: inverter_query_count
+  pv_power: ha_solar_pv_total
+  load_power: ha_inverter_load
+  grid_power: ha_grid_power
+  inverter_temp: ha_inverter_temp
 
 switch:
   - platform: gpio
@@ -609,6 +601,22 @@ light:
 # Sensors (Replicated from CAN Bus)
 # ------------------------------------------------------------------------------
 sensor:
+  # Home Assistant Inverter & Grid Telemetry for MicroSD Logger
+  - platform: homeassistant
+    id: ha_solar_pv_total
+    entity_id: sensor.home_energy_em11000_solar_total_power
+
+  - platform: homeassistant
+    id: ha_inverter_load
+    entity_id: sensor.home_energy_em11000_output_power
+
+  - platform: homeassistant
+    id: ha_grid_power
+    entity_id: sensor.home_energy_em11000_grid_power
+
+  - platform: homeassistant
+    id: ha_inverter_temp
+    entity_id: sensor.home_energy_em11000_inverter_temperature
   - platform: template
     name: "System Voltage (from CAN)"
     id: can_battery_voltage

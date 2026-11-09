@@ -140,7 +140,8 @@ views:
       max_line_width: 5
       min_line_width: 2
       inverter:
-        modern: true
+        modern: false
+        dynamic_colour: true
         colour: '#1e88e5'
         autarky: energy
         model: deye
@@ -161,7 +162,7 @@ views:
         auto_scale: true
         show_absolute: true
         invert_power: true
-        dynamic_colour: false
+        dynamic_colour: true
         linear_gradient: true
         hide_soc: false
         animate: true
@@ -173,7 +174,7 @@ views:
         show_daily: true
         mppts: 2
         auto_scale: true
-        dynamic_colour: false
+        dynamic_colour: true
         animation_speed: 1.5
         max_power: 7500
         pv1_max_power: 4000
@@ -184,15 +185,19 @@ views:
       load:
         show_daily: true
         dynamic_icon: true
-        dynamic_colour: false
+        dynamic_colour: true
         animation_speed: 1.5
         essential_name: House Load
+        path_threshold: 20
       grid:
         show_daily_buy: true
         show_daily_sell: false
         show_nonessential: false
         auto_scale: true
-        dynamic_colour: false
+        dynamic_colour: true
+        colour: '#5490c2'
+        no_grid_colour: '#9e9e9e'
+        off_threshold: 10
         invert_flow: false
       entities:
         inverter_status_59: binary_sensor.home_energy_em11000_status

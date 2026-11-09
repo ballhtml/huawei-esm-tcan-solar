@@ -40,6 +40,10 @@ CONF_PACK4_V = "pack4_v"
 CONF_PACK4_I = "pack4_i"
 
 CONF_INVERTER_QUERIES = "inverter_queries"
+CONF_PV_POWER = "pv_power"
+CONF_LOAD_POWER = "load_power"
+CONF_GRID_POWER = "grid_power"
+CONF_INVERTER_TEMP = "inverter_temp"
 CONF_TIME_ID = "time_id"
 
 sd_logger_ns = cg.esphome_ns.namespace("sd_logger")
@@ -74,6 +78,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_PACK4_V): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_PACK4_I): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_INVERTER_QUERIES): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_PV_POWER): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_LOAD_POWER): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_GRID_POWER): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_INVERTER_TEMP): cv.use_id(sensor.Sensor),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -115,6 +123,10 @@ async def to_code(config):
         (CONF_PACK4_V, "set_pack4_v"),
         (CONF_PACK4_I, "set_pack4_i"),
         (CONF_INVERTER_QUERIES, "set_inverter_queries"),
+        (CONF_PV_POWER, "set_pv_power"),
+        (CONF_LOAD_POWER, "set_load_power"),
+        (CONF_GRID_POWER, "set_grid_power"),
+        (CONF_INVERTER_TEMP, "set_inverter_temp"),
     ]:
         if key in config:
             s = await cg.get_variable(config[key])

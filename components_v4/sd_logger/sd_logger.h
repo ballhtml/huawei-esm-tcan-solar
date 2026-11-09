@@ -67,6 +67,10 @@ class SDLogger : public PollingComponent {
   void set_pack4_i(sensor::Sensor *s) { p4_i_ = s; }
 
   void set_inverter_queries(sensor::Sensor *s) { inq_sensor_ = s; }
+  void set_pv_power(sensor::Sensor *s) { pv_power_ = s; }
+  void set_load_power(sensor::Sensor *s) { load_power_ = s; }
+  void set_grid_power(sensor::Sensor *s) { grid_power_ = s; }
+  void set_inverter_temp(sensor::Sensor *s) { inverter_temp_ = s; }
 
   float get_setup_priority() const override { return setup_priority::LATE; }
 
@@ -206,7 +210,15 @@ class SDLogger : public PollingComponent {
 
     std::string dt = get_datetime_str();
     uint32_t sec = millis() / 1000;
-    fprintf(f, "%s,%lu,%.2f,%.2f,%.1f,%.1f,%.1f,%.1f,%.2f,%.2f,%.1f,%.2f,%.2f,%.1f,%.2f,%.2f,%.1f,%.2f,%.2f,%lu\n",
+    float pv_w = get_val(pv_power_);
+    float load_w = get_val(load_power_);
+    float grid_w = get_val(grid_power_);
+    float inv_t = get_val(inverter_temp_);
+    float ccl = g_li2_charge_limit_a;
+    float dcl = g_li2_discharge_limit_a;
+    unsigned long inq = (unsigned long)get_val(inq_sensor_);
+
+    fprintf(f, "%s,%lu,%.2f,%.2f,%.1f,%.1f,%.1f,%.0f,%.0f,%.1f,%.1f,%.1f,%.1f,%lu",
             dt.c_str(),
             (unsigned long)sec,
             get_val(voltage_sensor_),
@@ -214,11 +226,24 @@ class SDLogger : public PollingComponent {
             get_val(power_sensor_),
             get_val(soc_sensor_),
             get_val(temp_sensor_),
-            get_val(p1_soc_), get_val(p1_v_), get_val(p1_i_),
-            get_val(p2_soc_), get_val(p2_v_), get_val(p2_i_),
-            get_val(p3_soc_), get_val(p3_v_), get_val(p3_i_),
-            get_val(p4_soc_), get_val(p4_v_), get_val(p4_i_),
-            (unsigned long)get_val(inq_sensor_));
+            ccl, dcl,
+            pv_w, load_w, grid_w, inv_t,
+            inq);
+
+    bool direct_avail = is_tcan_direct_available();
+    for (int k = 0; k < 8; k++) {
+      if (direct_avail && g_tcan_direct_pkt.packs[k].is_online) {
+        float pv = g_tcan_direct_pkt.packs[k].voltage_x100 * 0.01f;
+        float pi = g_tcan_direct_pkt.packs[k].current_x10 * 0.1f;
+        float psoc = g_tcan_direct_pkt.packs[k].soc_x10 * 0.1f;
+        float pt = g_tcan_direct_pkt.packs[k].temp_x10 * 0.1f;
+        int16_t delta = g_tcan_direct_pkt.packs[k].delta_mv;
+        fprintf(f, ",%.1f,%.2f,%.2f,%.1f,%d", psoc, pv, pi, pt, (int)delta);
+      } else {
+        fprintf(f, ",0.0,0.00,0.00,0.0,0");
+      }
+    }
+    fprintf(f, "\n");
 
     fclose(f);
 
@@ -232,8 +257,16 @@ class SDLogger : public PollingComponent {
   void write_csv_header(const std::string &path) {
     FILE *f = fopen(path.c_str(), "w");
     if (f) {
-      fprintf(f, "datetime,uptime_sec,total_v,total_a,total_w,total_soc,max_temp,"
-                 "p1_soc,p1_v,p1_a,p2_soc,p2_v,p2_a,p3_soc,p3_v,p3_a,p4_soc,p4_v,p4_a,inverter_queries\n");
+      fprintf(f, "datetime,uptime_sec,sys_v,sys_a,sys_w,sys_soc,max_temp,"
+                 "ccl_limit,dcl_limit,pv_w,load_w,grid_w,inv_temp,inverter_queries,"
+                 "p1_soc,p1_v,p1_a,p1_t,p1_delta,"
+                 "p2_soc,p2_v,p2_a,p2_t,p2_delta,"
+                 "p3_soc,p3_v,p3_a,p3_t,p3_delta,"
+                 "p4_soc,p4_v,p4_a,p4_t,p4_delta,"
+                 "p5_soc,p5_v,p5_a,p5_t,p5_delta,"
+                 "p6_soc,p6_v,p6_a,p6_t,p6_delta,"
+                 "p7_soc,p7_v,p7_a,p7_t,p7_delta,"
+                 "p8_soc,p8_v,p8_a,p8_t,p8_delta\n");
       fclose(f);
       ESP_LOGI(TAG, "Created fresh CSV daily log header at %s", path.c_str());
     }
@@ -344,6 +377,10 @@ class SDLogger : public PollingComponent {
   sensor::Sensor *p4_i_{nullptr};
 
   sensor::Sensor *inq_sensor_{nullptr};
+  sensor::Sensor *pv_power_{nullptr};
+  sensor::Sensor *load_power_{nullptr};
+  sensor::Sensor *grid_power_{nullptr};
+  sensor::Sensor *inverter_temp_{nullptr};
 
   float get_val(sensor::Sensor *s) {
     return (s && s->has_state()) ? s->state : 0.0f;
@@ -510,6 +547,10 @@ class SDLogger : public PollingComponent {
             float total_w = get_val(power_sensor_);
             float total_soc = get_val(soc_sensor_);
             float max_t = get_val(temp_sensor_);
+            float pv_w = get_val(pv_power_);
+            float load_w = get_val(load_power_);
+            float grid_w = get_val(grid_power_);
+            float inv_t = get_val(inverter_temp_);
             unsigned long inq = (unsigned long)get_val(inq_sensor_);
             const char *i_col = (total_i > 0.5f) ? "#28a745" : ((total_i < -0.5f) ? "#fd7e14" : "#495057");
 
@@ -554,8 +595,13 @@ class SDLogger : public PollingComponent {
                      "<div class='stat'><div class='stat-lbl'>Total Power</div><div class='stat-val'>%.0f W</div></div>"
                      "<div class='stat'><div class='stat-lbl'>Total SOC</div><div class='stat-val'>%.0f %%</div></div>"
                      "<div class='stat'><div class='stat-lbl'>Max Cell Temp</div><div class='stat-val'>%.0f &deg;C</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Solar PV Total</div><div class='stat-val' style='color:#ffa500;'>%.0f W</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>House Load</div><div class='stat-val' style='color:#e83e8c;'>%.0f W</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Grid Power</div><div class='stat-val' style='color:#17a2b8;'>%.0f W</div></div>"
+                     "<div class='stat'><div class='stat-lbl'>Inverter Temp</div><div class='stat-val'>%.0f &deg;C</div></div>"
                      "</div></div>",
-                     total_v, i_col, total_i, total_w, total_soc, max_t);
+                     total_v, i_col, total_i, total_w, total_soc, max_t,
+                     pv_w, load_w, grid_w, inv_t);
             lwip_send(client_fd, chunk, strlen(chunk), 0);
 
             // 3. Card 2: Real-Time Battery Packs Table

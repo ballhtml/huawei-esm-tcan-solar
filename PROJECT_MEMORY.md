@@ -423,6 +423,24 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
 
 
 
+### 12.8 Autonomous Multi-Pack Watchdog & Dynamic Standby Auto-Wake (Release v5.5.0 - 2026-11-09)
+- **Problem Statement & Root Cause:**
+  - When battery packs (e.g. Pack 2 or Pack 4) were throttled or entered standby, their internal BMS remained latched in Mode 2 with DCL/CCL restrictions unless a clean dynamic wake sequence was transmitted.
+  - Previous equalizer only kicked in when total household load was heavy (`total_i <= -6.0A` / ~300-400W), leaving packs asleep during light night loads (200W - 300W).
+  - Attempting to force BMS modes via `0x000E = 2` (Standby) caused internal contactor/MOSFET latching.
+- **Permanent Solution:**
+  1. **Fully Autonomous Boot RAM/EEPROM Unlock (All 8 Packs):**
+     - In `tcan_telemetry_shared.h`, `exec_huawei_bms_equalizer_slot` runs the one-time boot sequence BEFORE `if (!g_eq_cmd_pending[idx]) return;`.
+     - Automatically writes `0x100B = 1000` (100A DCL), `0x100D = 1000` (100A CCL), `0xB798 = 0` (Disable Hybrid Boost), and `0x101B = 1000` (EEPROM Default Limit) in each pack's dedicated time slot using official Function Code `0x10`.
+  2. **Autonomous Multi-Pack Watchdog & Dynamic Wake (`total_i <= -4.0A`):**
+     - Lowered detection threshold from `-6.0A` to `-4.0A` (~200W).
+     - Whenever ANY pack is sleeping (`mode != 3` or `pi > -0.5A`) while other packs are discharging, the watchdog:
+       * Creates a gentle 0.2V-0.3V busbar voltage dip by throttling the hogging pack to 2.0A for 30s.
+       * Simultaneously sends `0x100B = 1000`, `0x100D = 1000`, `0xB798 = 0`, and `0x000E = 3` (Discharge) to the sleeping pack to engage its contactor softly.
+       * Once balanced, smoothly restores 100A DCL across all packs.
+  3. **Safe 25% Reserve Cutoff (No Mode 2 Latching):**
+     - Sets RAM `0x100B = 0` (0A DCL) while keeping `0x100D = 1000` (100A CCL) and NEVER writing `0x000E = 2`. The BMS remains completely online and immediately ready to receive solar charge in the morning.
+
 ### 12.7 Individual Pack 25% Safety Reserve Standby Cutoff (Release v5.4.0 - 2026-11-09)
 - **Problem Statement:**
   - Inverter-level 25% cutoff only checks total bank average SoC (which was ~37.7% at 04:00 AM).
@@ -467,3 +485,12 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
 - **Time-Slot Synchronized Active Load-Sharing Equalizer (`tcan_telemetry_shared.h`, Node 108 & Node 109):**
   - Eliminated RS485 bus queue collisions by executing per-pack Modbus writes (`exec_huawei_bms_equalizer_slot`) inside each pack's dedicated `3200ms..5000ms` quiet window of `modbus_polling_loop` (Node 108) and `modbus_pack8_polling` (Node 109).
   - Dynamically throttles RAM `0x100B` (`Discharge Limit Coef`) on any hogging pack while sending `0x100B=1000`, `0x100D=1000`, `0xB798=0`, and `0x000E=3` (`Mode 3`) to sleeping/lagging packs, and restores `0x100B=1000` automatically once balanced.
+- **Gen 5 Centralized MicroSD Data Logging Architecture (Node 109 & Node 108 Synergy):**
+  - **Topology:** Node 109 (192.168.8.109:8080) hosts the physical FAT32 MicroSD card slot and acts as the master datalogger. Node 108 polls Packs 1–7 and broadcasts all telemetry over UDP 5005 into g_tcan_direct_pkt.
+  - **Comprehensive 54-Column CSV Schema (http://192.168.8.109:8080/log.csv):**
+    - **System Metrics:** datetime,uptime_sec,sys_v,sys_a,sys_w,sys_soc,max_temp,ccl_limit,dcl_limit
+    - **Inverter & Grid Metrics (via Home Assistant Native API):** pv_w,load_w,grid_w,inv_temp,inverter_queries
+    - **Full 8-Pack Telemetry:** p1_soc,p1_v,p1_a,p1_t,p1_delta through p8_soc,p8_v,p8_a,p8_t,p8_delta
+  - **HTTP Dashboard (http://192.168.8.109:8080/):**
+    - Card 1: Live Total Voltage, Current, Power, SOC, Max Cell Temp, Solar PV Total, House Load, Grid Power, Inverter Temp, Li2 limits & status.
+    - Card 2: Real-time 8-Pack Load Sharing Table with individual Current, Power, Voltage, SOC, Cell Delta, and Max Cell Voltage.
