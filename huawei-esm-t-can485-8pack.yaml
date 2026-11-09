@@ -571,7 +571,7 @@ interval:
             }
 
             float fair_disch_i = (usable_disch > 0) ? (total_i / (float)usable_disch) : 0.0f;
-            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f) {
+            if (total_i <= -4.0f && usable_disch >= 2) {
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
                 if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
@@ -587,8 +587,8 @@ interval:
             }
 
             uint8_t cmd_mask = 0;
-            // Case A: Discharge Imbalance / Hogging Pack or Sleeping Packs
-            if (total_i <= -6.0f && usable_disch >= 2 && min_pi <= -5.5f && (sleeping_m2 > 0 || lagging_disch > 0)) {
+            // Case A: Discharge Imbalance / Hogging Pack or Sleeping Packs (Threshold: <= -4.0A / ~200W)
+            if (total_i <= -4.0f && usable_disch >= 2 && (sleeping_m2 > 0 || (min_pi <= -4.0f && lagging_disch > 0))) {
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
                 if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
@@ -599,7 +599,7 @@ interval:
                 if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
                 int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
 
-                if (pi <= -5.5f && pi < (fair_disch_i * 1.35f)) {
+                if (pi <= -4.0f && (sleeping_m2 > 0 || pi < (fair_disch_i * 1.30f))) {
                   // This pack is hogging the discharge load: throttle 0x100B (Discharge Limit Coef) in RAM
                   uint16_t throttle_coef = 20; // 0.020C = 2.0A when other packs are stuck in Mode 2 to force busbar dip & wake
                   if (sleeping_m2 == 0) {
@@ -612,7 +612,7 @@ interval:
                   g_eq_cmd_pending[idx] = true;
                   cmd_mask |= (uint8_t)(1U << idx);
                 } else if (mode_int != 3 || (pi > (fair_disch_i * 0.55f) && g_eq_last_disch_coef[idx] >= 1000)) {
-                  // This pack is sleeping (Mode 2) or lagging (and not an intentionally throttled hogging pack):
+                  // This pack is sleeping (Mode 2) or lagging: ensure 100A DCL/CCL open and wake to Mode 3
                   g_eq_disch_coef[idx] = 1000;
                   g_eq_chg_coef[idx] = 1000;
                   g_eq_force_mode3[idx] = (mode_int != 3) ? 1 : 0;
@@ -620,8 +620,8 @@ interval:
                   cmd_mask |= (uint8_t)(1U << idx);
                 }
               }
-            } else if (total_i > -3.0f) {
-              // Restore previously throttled packs back to 1000 (100A) ONLY when discharge has ENDED (idle / solar charging)
+            } else if (total_i > -2.5f) {
+              // Restore previously throttled packs back to 1000 (100A) when discharge has ended
               for (int idx = 0; idx < 8; idx++) {
                 if (g_eq_last_disch_coef[idx] < 1000) {
                   g_eq_disch_coef[idx] = 1000;
@@ -668,6 +668,36 @@ interval:
                   g_eq_cmd_pending[idx] = true;
                   cmd_mask |= (uint8_t)(1U << idx);
                 }
+              }
+            }
+
+            // Case C: Individual Pack 25% Reserve Standby Floor Protection (SoC <= 25.0% or Voltage <= 48.0V)
+            // Cuts off discharge (DCL=0A in RAM) to preserve reserve WITHOUT touching Mode 2 (prevents BMS latch)!
+            for (int idx = 0; idx < 8; idx++) {
+              uint32_t max_age = (idx == 7) ? 30000 : 90000;
+              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+              float pi = p_i[idx]->state;
+              float pv = p_v[idx]->state;
+              float psoc = p_soc[idx]->state;
+              if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
+
+              if (psoc <= 25.0f || pv <= 48.0f) {
+                if (g_eq_disch_coef[idx] > 0 || g_eq_last_disch_coef[idx] > 0) {
+                  g_eq_disch_coef[idx] = 0;   // 0.0A DCL in RAM: Stop discharging immediately!
+                  g_eq_chg_coef[idx] = 1000;  // Keep 100A CCL open so solar charging works instantly
+                  g_eq_force_mode3[idx] = 0;  // NEVER write Mode 2: keep BMS fully online & ready to charge!
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                  ESP_LOGW("auto_equalizer", "Pack %d hit 25%% reserve floor (SoC=%.1f%%, V=%.2fV) -> DCL=0A", idx + 1, psoc, pv);
+                }
+              } else if (psoc >= 30.0f && g_eq_disch_coef[idx] == 0) {
+                // Hysteresis recovery: once recharged above 30%, restore DCL to 1000 (100A)
+                g_eq_disch_coef[idx] = 1000;
+                g_eq_chg_coef[idx] = 1000;
+                g_eq_force_mode3[idx] = 0;
+                g_eq_cmd_pending[idx] = true;
+                cmd_mask |= (uint8_t)(1U << idx);
+                ESP_LOGW("auto_equalizer", "Pack %d recovered above 30%% (SoC=%.1f%%, V=%.2fV) -> Restoring DCL=100A", idx + 1, psoc, pv);
               }
             }
 
@@ -2273,6 +2303,30 @@ sensor:
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 RAM Discharge Limit"
+    id: pack4_ram_disch_limit
+    register_type: holding
+    address: 0x100B
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "A"
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: huawei_esm_pack4
+    name: "Pack 4 RAM Charge Limit"
+    id: pack4_ram_chg_limit
+    register_type: holding
+    address: 0x100D
+    value_type: U_WORD
+    accuracy_decimals: 1
+    unit_of_measurement: "A"
+    filters:
+      - multiply: 0.1
 
   - platform: modbus_controller
     modbus_controller_id: huawei_esm_pack4
