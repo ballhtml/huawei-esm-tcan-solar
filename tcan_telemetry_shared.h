@@ -371,12 +371,14 @@ inline uint16_t g_eq_last_chg_coef[8]   = {0, 0, 0, 0, 0, 0, 0, 0};
 inline uint8_t  g_eq_last_mode_sent[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline uint32_t g_eq_last_mode3_ms[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline bool     g_eq_eeprom_unlocked[8] = {false, false, false, false, false, false, false, false};
+inline bool     g_eq_restore_eeprom_pending[8] = {false, false, false, false, false, false, false, false};
 
 template <typename TCtrl, typename TCmdItem>
 inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
   if (idx < 0 || idx >= 8 || ctrl == nullptr) return;
 
-  // 1. Fully Automatic One-time Boot Initialization: Wide open RAM & EEPROM (100A DCL, 100A CCL, Hybrid=0, EEPROM=100A)
+  // 1. Non-Destructive RAM-Only Boot Initialization (100A DCL, 100A CCL, Hybrid=0)
+  //    Never overwrites EEPROM (0x101B) on boot so battery power-cycling cleanly restores factory default!
   if (!g_eq_eeprom_unlocked[idx]) {
     g_eq_eeprom_unlocked[idx] = true;
     ctrl->set_allow_duplicate_commands(true);
@@ -396,12 +398,25 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
     ctrl->queue_command(cmd_hyb);
 
-    // EEPROM 0x101B: Permanent Default Charge Limit Coef = 1000 (100.0A)
-    std::vector<uint16_t> v_eeprom = {1000};
+    ESP_LOGI("bms_auto_init", "Pack %d RAM-only boot unlock sent (0x100B=100A, 0x100D=100A, 0xB798=0; EEPROM untouched)", idx + 1);
+  }
+
+  // 1b. Optional One-Shot EEPROM Default Restore (0x101B = 500 -> 0.500C / 50A)
+  if (g_eq_restore_eeprom_pending[idx]) {
+    g_eq_restore_eeprom_pending[idx] = false;
+    ctrl->set_allow_duplicate_commands(true);
+
+    std::vector<uint16_t> v_eeprom = {500};
     auto cmd_eeprom = TCmdItem::create_write_multiple_command(ctrl, 0x101B, 1, v_eeprom);
     ctrl->queue_command(cmd_eeprom);
 
-    ESP_LOGI("bms_auto_init", "Pack %d automatic boot RAM/EEPROM unlock sent (0x100B=100A, 0x100D=100A, 0xB798=0, 0x101B=100A)", idx + 1);
+    // Keep RAM active at 100A for current operation
+    std::vector<uint16_t> v_dis = {1000};
+    ctrl->queue_command(TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis));
+    std::vector<uint16_t> v_chg = {1000};
+    ctrl->queue_command(TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg));
+
+    ESP_LOGW("bms_auto_init", "Pack %d EEPROM 0x101B restored to 0.500C (50A) default (RAM kept at 100A)", idx + 1);
   }
 
   if (!g_eq_cmd_pending[idx]) return;
@@ -428,7 +443,7 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
   }
 
   // 4. Mode 3 and Hybrid Boost control (cooldown-guarded retry so stuck Mode-2 packs always wake cleanly)
-  uint32_t now_m = millis();
+  uint32_t now_m = esphome::millis();
   if (force_m3) {
     if (g_eq_last_mode_sent[idx] != 3 || g_eq_last_mode3_ms[idx] == 0 || (now_m - g_eq_last_mode3_ms[idx] >= 35000)) {
       g_eq_last_mode_sent[idx] = 3;

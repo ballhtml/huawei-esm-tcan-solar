@@ -551,6 +551,12 @@ interval:
             float min_soc = 100.0f;
             float max_soc = 0.0f;
 
+            for (int idx = 0; idx < 7; idx++) {
+              if (!is_pack_fresh(idx, 90000)) {
+                g_eq_eeprom_unlocked[idx] = false;
+              }
+            }
+
             for (int idx = 0; idx < 8; idx++) {
               uint32_t max_age = (idx == 7) ? 30000 : 90000;
               if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
@@ -1304,6 +1310,19 @@ button:
     icon: "mdi:barcode-scan"
     on_press:
       - script.execute: read_esn_all
+
+  - platform: template
+    name: "Restore All Packs EEPROM (0.50C)"
+    id: btn_restore_eeprom_50a
+    icon: "mdi:backup-restore"
+    on_press:
+      - lambda: |-
+          for (int k = 0; k < 7; k++) {
+            g_eq_restore_eeprom_pending[k] = true;
+          }
+          std::vector<uint8_t> d_rst = {0x57, 0x4B, 0x08, 0xEE, 0xE8, 0x03, 0xE8, 0x03};
+          id(interconnect_can_bus).send_data(0x35F, false, d_rst);
+          ESP_LOGW("bms_auto_init", "Queued one-shot EEPROM restore (0x101B = 0.50C / 50A) for all 8 packs!");
 
 # ------------------------------------------------------------------------------
 # Modbus Sensors — Huawei ESM-48100B1 (Pack 1 to 8 + Individual Cell Voltages)

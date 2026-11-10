@@ -135,6 +135,10 @@ canbus:
         then:
           - lambda: |-
               uint8_t fm3 = (x.size() >= 4) ? x[3] : 1;
+              if (fm3 == 0xEE) {
+                g_eq_restore_eeprom_pending[7] = true;
+                fm3 = 0;
+              }
               uint16_t dcoef = (x.size() >= 6) ? (uint16_t)(x[4] | (x[5] << 8)) : 1000;
               uint16_t ccoef = (x.size() >= 8) ? (uint16_t)(x[6] | (x[7] << 8)) : 1000;
               if (dcoef < 15) dcoef = 15;
@@ -246,6 +250,10 @@ interval:
             int len = ::recvfrom(udp_sock, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &socklen);
             if (len >= 4 && buf[0] == 0xAA && buf[1] == 0x57 && buf[2] == 0x4B && buf[3] == 0x08) {
               uint8_t fm3 = (len >= 5) ? buf[4] : 1;
+              if (fm3 == 0xEE) {
+                g_eq_restore_eeprom_pending[7] = true;
+                fm3 = 0;
+              }
               uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
               uint16_t ccoef = (len >= 9) ? (uint16_t)(buf[7] | (buf[8] << 8)) : 1000;
               if (dcoef < 15) dcoef = 15;
