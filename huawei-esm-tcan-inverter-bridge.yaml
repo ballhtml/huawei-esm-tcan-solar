@@ -554,6 +554,21 @@ switch:
     restore_mode: ALWAYS_OFF
     setup_priority: 600.0
 
+  - platform: template
+    name: "Li2 Calibration Boost (53.6V)"
+    id: li2_calibration_boost_switch
+    icon: "mdi:battery-charging-high"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: |-
+          esphome::pylontech_emulator::g_li2_calibration_boost = true;
+          ESP_LOGW("li2_cal", "Manual Calibration Boost ENABLED -> Target 53.6V (3.58V cell guard active)");
+    turn_off_action:
+      - lambda: |-
+          esphome::pylontech_emulator::g_li2_calibration_boost = false;
+          ESP_LOGW("li2_cal", "Manual Calibration Boost DISABLED -> Restored Gen 5 Stage-1/2 Limits");
+
 script:
   - id: modbus_pack8_polling
     mode: restart

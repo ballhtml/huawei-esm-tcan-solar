@@ -909,6 +909,46 @@ views:
         tap_action:
           action: url
           url_path: http://192.168.8.109:8080/
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        entity: switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v
+        primary: Calibration Boost (53.6V)
+        secondary: >-
+          {% if is_state('switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v', 'on') %}
+            เปิดอยู่ (Target {{ states('sensor.home_energy_inverter_bridge_logger_li2_target_charge_voltage') | float(53.6) | round(1) }}V) · แตะปิด
+          {% else %}
+            ปิดอยู่ (ลิมิตปกติ {{ states('sensor.home_energy_inverter_bridge_logger_li2_target_charge_voltage') | float(52.5) | round(1) }}V) · แตะเปิด
+          {% endif %}
+        icon: >-
+          {% if is_state('switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v', 'on') %}
+            mdi:battery-charging-high
+          {% else %}
+            mdi:shield-lock
+          {% endif %}
+        icon_color: >-
+          {% if is_state('switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v', 'on') %}
+            orange
+          {% else %}
+            grey
+          {% endif %}
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+      - type: custom:mushroom-template-card
+        entity: sensor.home_energy_inverter_bridge_logger_li2_charge_throttling_reason
+        primary: BMS Limit Status
+        secondary: "{{ states('sensor.home_energy_inverter_bridge_logger_li2_charge_throttling_reason') }}"
+        icon: mdi:speedometer
+        icon_color: >-
+          {% if is_state('switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v', 'on') %}
+            amber
+          {% else %}
+            teal
+          {% endif %}
+        tap_action:
+          action: more-info
 - title: Cell Diagnostics
   path: cells
   icon: mdi:battery-heart-variant

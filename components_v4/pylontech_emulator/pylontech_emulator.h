@@ -27,6 +27,7 @@ inline const char* g_li2_throttling_reason = "NORMAL (140A)";
 inline bool g_li2_auto_calibrated_100 = false;
 inline uint32_t g_last_can_frame_ms = 0;
 inline float g_li2_target_charge_v = 53.8f;
+inline bool g_li2_calibration_boost = false;
 
 class PylontechEmulator : public Component, public uart::UARTDevice {
  public:
@@ -321,7 +322,10 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     } else if (max_cell >= 3580) {
       target_limit = std::min(target_limit, (uint16_t)200); // 20.0A Emergency Safety Brake
       ESP_LOGW(TAG, "EMERGENCY SAFETY BRAKE 3.58V: Max cell %u mV -> Throttled to 20.0A", max_cell);
-    } 
+    } else if (g_li2_calibration_boost) {
+      // Manual 100% Calibration Boost: Hold 80A (taper 40A >= 3.55V) while Priority 0 guards 3.58V+
+      target_limit = (max_cell >= 3550) ? 400 : 800;
+    }
     // Priority 1: Staging Parallel Balancing (Busbar clamped 52.5V-52.8V; keep CCL wide open so hungry packs absorb full solar!)
     else if (in_staging_balance) {
       if (min_cell < 3400) {
@@ -422,6 +426,8 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       g_li2_throttling_reason = "EMERGENCY_SPIKE_3.62V (0A)";
     } else if (max_cell >= 3580) {
       g_li2_throttling_reason = "SAFETY_BRAKE_3.58V (20A)";
+    } else if (g_li2_calibration_boost) {
+      g_li2_throttling_reason = (max_cell >= 3550) ? "CAL_BOOST_TAPER (40A)" : "CAL_BOOST_53.6V (80A)";
     } else if (in_staging_balance) {
       if (min_cell < 3400) {
         g_li2_throttling_reason = "STAGING_BAL_52.5V (120A)";
@@ -925,8 +931,12 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
 
     uint16_t target_mv = 53600; // 53.6V safe fast bulk charge (~3.57V/cell)
 
+    if (g_li2_calibration_boost) {
+      // Manual 100% Calibration Boost: Push smoothly to 53.6V (taper 53.3V >= 3.57V) to complete full saturation & SOC reset
+      target_mv = (max_cell >= 3570) ? 53300 : 53600;
+    }
     // 1. High-Cell Relief Clamp: If any cell hits >= 3550 mV, clamp busbar to 52.5V immediately to relieve cell pressure
-    if (max_cell >= 3550) {
+    else if (max_cell >= 3550) {
       target_mv = 52500;
     }
     // 2. Stage-1 Parallel Balancing Clamp: Leading cell >= 3460 mV while lagging cell < 3400 mV
