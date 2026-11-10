@@ -494,3 +494,7 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
   - **HTTP Dashboard (http://192.168.8.109:8080/):**
     - Card 1: Live Total Voltage, Current, Power, SOC, Max Cell Temp, Solar PV Total, House Load, Grid Power, Inverter Temp, Li2 limits & status.
     - Card 2: Real-time 8-Pack Load Sharing Table with individual Current, Power, Voltage, SOC, Cell Delta, and Max Cell Voltage.
+- **Node 108 Release v5.6.0 — Dynamic Low-Sun Solar Charge Equalizer (2026-11-10):**
+  - Replaced legacy fixed-threshold Case B (`max_pi >= 10A` / fixed `8.0A` cap) with **Dynamic Solar Charge Diversion** active whenever `total_i >= 4.0A` and SOC spread `>= 8%` (`min_soc < 92%`).
+  - Automatically computes dynamic RAM `0x100D` Charge Limit (`2.0A` minimum floor up to `100A`, quantized to `1.0A` steps) on high-SOC packs (`>= 93%` or `>= 88%` when `min_soc < 78%`), targeting up to `20A` per lagging pack (e.g., Pack 4 with SOC drift) even in mild afternoon sun while spilling excess current safely across full packs and releasing all packs if any hungry pack hits `53.45V`.
+  - Pre-upgrade full backup preserved in `backups/v5.5.0_20261110_1458/` and Git tag `backup-v5.5.0-20261110`.

@@ -548,6 +548,8 @@ interval:
             float min_pi = 0.0f;
             int lead_chg_pack = -1;
             float max_pi = 0.0f;
+            float min_soc = 100.0f;
+            float max_soc = 0.0f;
 
             for (int idx = 0; idx < 8; idx++) {
               uint32_t max_age = (idx == 7) ? 30000 : 90000;
@@ -568,6 +570,8 @@ interval:
                 max_pi = pi;
                 lead_chg_pack = idx + 1;
               }
+              if (psoc < min_soc) min_soc = psoc;
+              if (psoc > max_soc) max_soc = psoc;
             }
 
             float fair_disch_i = (usable_disch > 0) ? (total_i / (float)usable_disch) : 0.0f;
@@ -633,35 +637,82 @@ interval:
               }
             }
 
-            // Case B: Solar Charge Equalizer (Active Solar Balancing & Diversion)
-            if (total_i >= 6.0f && lead_chg_pack > 0 && max_pi >= 10.0f) {
+            // Case B: Gen 5 Dynamic Solar Charge Equalizer (Active Diversion across Low/Mid/High Sun)
+            // Runs whenever total_i >= 4.0A AND SOC spread >= 8% (with lagging pack < 92%).
+            // Dynamically caps high-SOC packs (down to 2.0A floor in mild sun) to force solar amps into hungry packs.
+            if (total_i >= 4.0f && max_soc > min_soc && (max_soc - min_soc) >= 8.0f && min_soc < 92.0f) {
+              int high_count = 0;
+              int hungry_count = 0;
+              bool any_hungry_overvolt = false;
+
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
                 if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-                float pi = p_i[idx]->state;
                 float pv = p_v[idx]->state;
                 float psoc = p_soc[idx]->state;
-                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
+                if (!std::isfinite(pv) || !std::isfinite(psoc)) continue;
 
-                // If this pack is high SoC (>=85%) or cell spiking high and soaking up charge ahead of hungry packs (<75%):
-                if ((psoc >= 85.0f || pv >= 53.0f) && pi >= 8.0f) {
-                  // Throttle charge current to 80 (8.0A) in RAM to divert MPPT amps to hungry packs
-                  g_eq_chg_coef[idx] = 80;
-                  g_eq_disch_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 0;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                } else if (psoc < 80.0f && g_eq_last_chg_coef[idx] < 1000) {
-                  // Ensure hungry pack has 100A charge limit wide open
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_disch_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 0;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
+                bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
+                               (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
+                               (pv >= 53.0f);
+                if (is_high) {
+                  high_count++;
+                } else {
+                  hungry_count++;
+                  if (pv >= 53.45f) any_hungry_overvolt = true;
                 }
               }
-            } else if (total_i < 2.0f) {
-              // When charging stops (idle or discharge), restore all charge limits back to 1000 (100A)
+
+              if (high_count > 0 && hungry_count > 0 && !any_hungry_overvolt) {
+                float hungry_target_a = 20.0f * (float)hungry_count;
+                float excess_a = std::max(0.0f, total_i - hungry_target_a);
+                float per_high_a = excess_a / (float)high_count;
+                uint16_t raw_coef = (uint16_t)std::min(1000.0f, std::max(20.0f, per_high_a * 10.0f));
+                uint16_t dyn_chg_coef = ((raw_coef + 5) / 10) * 10;
+                uint8_t pre_mask = cmd_mask;
+
+                for (int idx = 0; idx < 8; idx++) {
+                  uint32_t max_age = (idx == 7) ? 30000 : 90000;
+                  if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+                  float pv = p_v[idx]->state;
+                  float psoc = p_soc[idx]->state;
+                  if (!std::isfinite(pv) || !std::isfinite(psoc)) continue;
+
+                  bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
+                                 (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
+                                 (pv >= 53.0f);
+                  if (is_high) {
+                    if (g_eq_last_chg_coef[idx] != dyn_chg_coef) {
+                      g_eq_chg_coef[idx] = dyn_chg_coef;
+                      g_eq_disch_coef[idx] = 1000;
+                      g_eq_force_mode3[idx] = 0;
+                      g_eq_cmd_pending[idx] = true;
+                      cmd_mask |= (uint8_t)(1U << idx);
+                    }
+                  } else if (g_eq_last_chg_coef[idx] < 1000) {
+                    g_eq_chg_coef[idx] = 1000;
+                    g_eq_disch_coef[idx] = 1000;
+                    g_eq_force_mode3[idx] = 0;
+                    g_eq_cmd_pending[idx] = true;
+                    cmd_mask |= (uint8_t)(1U << idx);
+                  }
+                }
+                if (cmd_mask != pre_mask) {
+                  ESP_LOGW("auto_equalizer",
+                           "Solar Charge Divert: Total=%.1fA MinSOC=%.0f%% MaxSOC=%.0f%% HighCap=%.1fA Hungry=%d High=%d",
+                           total_i, min_soc, max_soc, dyn_chg_coef * 0.1f, hungry_count, high_count);
+                }
+              } else {
+                for (int idx = 0; idx < 8; idx++) {
+                  if (g_eq_last_chg_coef[idx] < 1000) {
+                    g_eq_chg_coef[idx] = 1000;
+                    g_eq_cmd_pending[idx] = true;
+                    cmd_mask |= (uint8_t)(1U << idx);
+                  }
+                }
+              }
+            } else {
+              // Charging stopped or bank already balanced: restore all charge limits back to 1000 (100A)
               for (int idx = 0; idx < 8; idx++) {
                 if (g_eq_last_chg_coef[idx] < 1000) {
                   g_eq_chg_coef[idx] = 1000;
