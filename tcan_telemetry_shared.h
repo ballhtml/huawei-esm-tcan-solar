@@ -369,6 +369,7 @@ inline bool     g_eq_cmd_pending[8] = {true, true, true, true, true, true, true,
 inline uint16_t g_eq_last_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint16_t g_eq_last_chg_coef[8]   = {0, 0, 0, 0, 0, 0, 0, 0};
 inline uint8_t  g_eq_last_mode_sent[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+inline uint32_t g_eq_last_mode3_ms[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline bool     g_eq_eeprom_unlocked[8] = {false, false, false, false, false, false, false, false};
 
 template <typename TCtrl, typename TCmdItem>
@@ -426,19 +427,25 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     ctrl->queue_command(cmd_chg10);
   }
 
-  // 4. Mode 3 and Hybrid Boost control (single-latch to prevent relay contactor chatter)
-  if (force_m3 && g_eq_last_mode_sent[idx] != 3) {
-    g_eq_last_mode_sent[idx] = 3;
+  // 4. Mode 3 and Hybrid Boost control (cooldown-guarded retry so stuck Mode-2 packs always wake cleanly)
+  uint32_t now_m = millis();
+  if (force_m3) {
+    if (g_eq_last_mode_sent[idx] != 3 || g_eq_last_mode3_ms[idx] == 0 || (now_m - g_eq_last_mode3_ms[idx] >= 35000)) {
+      g_eq_last_mode_sent[idx] = 3;
+      g_eq_last_mode3_ms[idx] = now_m;
 
-    std::vector<uint16_t> v_hyb = {0};
-    auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
-    ctrl->queue_command(cmd_hyb);
+      std::vector<uint16_t> v_hyb = {0};
+      auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
+      ctrl->queue_command(cmd_hyb);
 
-    std::vector<uint16_t> v_m3 = {3};
-    auto cmd_m3 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m3);
-    ctrl->queue_command(cmd_m3);
-  } else if (!force_m3) {
+      std::vector<uint16_t> v_m3 = {3};
+      auto cmd_m3 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m3);
+      ctrl->queue_command(cmd_m3);
+      ESP_LOGW("bms_wake", "Pack %d -> Sending Mode 3 wake (0xB798=0, 0x000E=3)", idx + 1);
+    }
+  } else {
     g_eq_last_mode_sent[idx] = 0;
+    g_eq_last_mode3_ms[idx] = 0;
   }
 }
 

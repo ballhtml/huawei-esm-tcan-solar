@@ -501,3 +501,6 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
 - **Node 109 Manual Calibration Boost Switch (`Li2 Calibration Boost (53.6V)` - 2026-11-10):**
   - Added Home Assistant switch `switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v` (`restore_mode: ALWAYS_OFF`) + Dashboard button under `System Controls & Diagnostics`.
   - When toggled ON, temporarily overrides Stage-1/2 (`52.5V/52.8V`) voltage clamps to push target up to `53.6V` (`80A` CCL, tapering to `40A >= 3.55V` and `53.3V >= 3.57V`) for full 100% SOC saturation & BMS reset, while keeping Priority 0 cell-spike safety brake (`3.58V -> 20A`, `3.62V -> 0A`) always active.
+- **Node 108 Release v5.6.1 — Reliable Mode-3 Wake Retry & Anti-PingPong Equalizer (2026-11-10):**
+  - Fixed `g_eq_last_mode_sent` single-latch bug in `tcan_telemetry_shared.h` by replacing it with a 35s cooldown timer (`g_eq_last_mode3_ms`) so any pack remaining in Mode 2 or `0A` under load retries `0xB798=0, 0x000E=3` reliably without contactor chatter.
+  - Fixed Case A `else if` lock condition (`g_eq_last_disch_coef >= 1000`) in `huawei-esm-t-can485-8pack*.yaml` so previously throttled packs immediately release back to `100A` (`1000`) once hogging stops, eliminating load ping-pong and smoothly waking Pack 2 & Pack 3 into balanced multi-pack discharge.

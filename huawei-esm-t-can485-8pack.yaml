@@ -590,6 +590,13 @@ interval:
               }
             }
 
+            int active_disch_packs = 0;
+            for (int idx = 0; idx < 8; idx++) {
+              uint32_t max_age = (idx == 7) ? 30000 : 90000;
+              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
+              if (p_i[idx]->state <= -1.0f) active_disch_packs++;
+            }
+
             uint8_t cmd_mask = 0;
             // Case A: Discharge Imbalance / Hogging Pack or Sleeping Packs (Threshold: <= -4.0A / ~200W)
             if (total_i <= -4.0f && usable_disch >= 2 && (sleeping_m2 > 0 || (min_pi <= -4.0f && lagging_disch > 0))) {
@@ -603,23 +610,32 @@ interval:
                 if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
                 int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
 
-                if (pi <= -4.0f && (sleeping_m2 > 0 || pi < (fair_disch_i * 1.30f))) {
-                  // This pack is hogging the discharge load: throttle 0x100B (Discharge Limit Coef) in RAM
-                  uint16_t throttle_coef = 20; // 0.020C = 2.0A when other packs are stuck in Mode 2 to force busbar dip & wake
-                  if (sleeping_m2 == 0) {
-                    float target_a = std::max(4.0f, (-fair_disch_i) * 1.20f);
-                    throttle_coef = (uint16_t)std::min(1000.0f, target_a * 10.0f);
-                  }
-                  g_eq_disch_coef[idx] = throttle_coef;
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 0;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                } else if (mode_int != 3 || (pi > (fair_disch_i * 0.55f) && g_eq_last_disch_coef[idx] >= 1000)) {
-                  // This pack is sleeping (Mode 2) or lagging: ensure 100A DCL/CCL open and wake to Mode 3
+                if (mode_int != 3 || (pi > -0.5f && total_i <= -8.0f)) {
+                  // Sleeping (Mode 2) or stuck at 0A under load: force 100A DCL wide open and send Mode 3 wake!
                   g_eq_disch_coef[idx] = 1000;
                   g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = (mode_int != 3) ? 1 : 0;
+                  g_eq_force_mode3[idx] = 1;
+                  g_eq_cmd_pending[idx] = true;
+                  cmd_mask |= (uint8_t)(1U << idx);
+                } else if (pi <= -5.0f && pi < (fair_disch_i * 1.25f)) {
+                  // This pack is hogging the discharge load: throttle 0x100B smoothly to 1.15x fair share (2.0A only if single pack hogs all)
+                  uint16_t throttle_coef = 20;
+                  if (active_disch_packs > 1 || sleeping_m2 == 0) {
+                    float target_a = std::max(4.0f, (-fair_disch_i) * 1.15f);
+                    throttle_coef = (uint16_t)std::min(1000.0f, target_a * 10.0f);
+                  }
+                  if (g_eq_last_disch_coef[idx] != throttle_coef) {
+                    g_eq_disch_coef[idx] = throttle_coef;
+                    g_eq_chg_coef[idx] = 1000;
+                    g_eq_force_mode3[idx] = 0;
+                    g_eq_cmd_pending[idx] = true;
+                    cmd_mask |= (uint8_t)(1U << idx);
+                  }
+                } else if (g_eq_last_disch_coef[idx] < 1000) {
+                  // Previously throttled pack is no longer hogging: immediately release back to 1000 (100A) to stop ping-pong!
+                  g_eq_disch_coef[idx] = 1000;
+                  g_eq_chg_coef[idx] = 1000;
+                  g_eq_force_mode3[idx] = 0;
                   g_eq_cmd_pending[idx] = true;
                   cmd_mask |= (uint8_t)(1U << idx);
                 }
