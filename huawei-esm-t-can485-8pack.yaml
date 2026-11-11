@@ -661,11 +661,15 @@ interval:
 
             // Case B: Gen 5 Dynamic Solar Charge Equalizer (Active Diversion across Low/Mid/High Sun)
             // Runs whenever total_i >= 4.0A AND SOC spread >= 8% (with lagging pack < 92%).
-            // Dynamically caps high-SOC packs (down to 2.0A floor in mild sun) to force solar amps into hungry packs.
+            // Works at ANY SOC level when spread >= 18% (morning equalization) as well as top-end (>= 88%/93%),
+            // with voltage hysteresis latch (releases at 53.20V, re-arms below 51.80V) to prevent ping-pong.
+            static bool s_caseb_voltage_done = false;
+            if (total_i < 2.0f) s_caseb_voltage_done = false;
+
             if (total_i >= 4.0f && max_soc > min_soc && (max_soc - min_soc) >= 8.0f && min_soc < 92.0f) {
               int high_count = 0;
               int hungry_count = 0;
-              bool any_hungry_overvolt = false;
+              float max_hungry_v = 0.0f;
 
               for (int idx = 0; idx < 8; idx++) {
                 uint32_t max_age = (idx == 7) ? 30000 : 90000;
@@ -676,16 +680,22 @@ interval:
 
                 bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
                                (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
+                               (psoc >= (min_soc + 18.0f)) ||
                                (pv >= 53.0f);
                 if (is_high) {
                   high_count++;
                 } else {
                   hungry_count++;
-                  if (pv >= 53.45f) any_hungry_overvolt = true;
+                  if (pv > max_hungry_v) max_hungry_v = pv;
                 }
               }
 
-              if (high_count > 0 && hungry_count > 0 && !any_hungry_overvolt) {
+              if (hungry_count > 0) {
+                if (max_hungry_v >= 53.20f) s_caseb_voltage_done = true;
+                else if (max_hungry_v < 51.80f) s_caseb_voltage_done = false;
+              }
+
+              if (high_count > 0 && hungry_count > 0 && !s_caseb_voltage_done) {
                 float hungry_target_a = 20.0f * (float)hungry_count;
                 float excess_a = std::max(0.0f, total_i - hungry_target_a);
                 float per_high_a = excess_a / (float)high_count;
@@ -702,6 +712,7 @@ interval:
 
                   bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
                                  (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
+                                 (psoc >= (min_soc + 18.0f)) ||
                                  (pv >= 53.0f);
                   if (is_high) {
                     if (g_eq_last_chg_coef[idx] != dyn_chg_coef) {

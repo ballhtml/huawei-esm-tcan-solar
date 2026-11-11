@@ -510,3 +510,7 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
 - **EM11000 Bridge Temperature & SOC Register Fix (`em11000_bridge/__init__.py` on `192.168.8.209`, 2026-11-10):**
   - Fixed swapped register decoding in `em11000_bridge`: Reg `280` (`0x0118`) is Battery SOC (`%`) and Reg `281` (`0x0119`) is DC Module Temp (`°C`), whereas `inverter_temperature` was previously receiving Reg `280` (Battery SOC).
   - Added Reg `305` (`0x0131`) read for genuine Inverter Module Temperature (`~28 °C`) with `t_dc` (`~35 °C`) fallback, and updated HA states directly so Sunsynk dashboard and Node 109 SD Logger report true temperatures.
+- **Node 108 Release v5.6.3 — Full-Range Morning Case B Solar Diversion & Hysteresis (2026-11-11):**
+  - Updated `is_high` in `huawei-esm-t-can485-8pack*.yaml` Case B (`auto_equalizer`) by adding `(psoc >= (min_soc + 18.0f))` so morning diversion activates cleanly across mid-SOC banks (e.g., Packs 1–3, 5–8 at `67%–76%` vs Pack 4 at `45%`) whenever spread reaches `>= 18%`, without waiting for `max_soc >= 88%`.
+  - Replaced single-point `any_hungry_overvolt` with latched voltage hysteresis `s_caseb_voltage_done` (releases throttling if any hungry pack `>= 53.20V`; re-arms only when `< 51.80V` or `total_i < 2.0A`) to prevent ping-pong.
+  - Verified live on `192.168.8.108` & `192.168.8.109:8080` at `09:46`: `Solar Charge Divert: MinSOC=45% MaxSOC=76% HighCap=2.0A`, Packs 1–3/5–8 throttled to `+1.80A–+2.20A`, Pack 4 jumped from `+2.70A` to **`+6.90A` (346 W)** as #1 charging pack (`50.17V`, `4 mV` delta).
