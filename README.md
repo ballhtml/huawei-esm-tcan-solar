@@ -1,6 +1,6 @@
-# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 5: v5.4.0)
+# Huawei ESM-48100B1 (8-Pack 38.4 kWh / 120 Cells) & Closed-Loop Inverter Integration (Gen 6: v6.0.0)
 
-[![Release: v5.2.0 Gen 5](https://img.shields.io/badge/Release-v5.4.0%20(Gen%205)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
+[![Release: v6.0.0 Gen 6](https://img.shields.io/badge/Release-v6.0.0%20(Gen%206)-brightgreen.svg)](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)
 [![Hardware: Dual LILYGO T-CAN485](https://img.shields.io/badge/Hardware-2x%20LILYGO%20T--CAN485%20(ESP32)-blue.svg)](https://github.com/Xinyuan-LilyGO/T-CAN485)
 [![Framework: ESPHome](https://img.shields.io/badge/Framework-ESPHome%202026.6+-green.svg)](https://esphome.io/)
 [![Protocol: Pylontech LI2 & Modbus RTU](https://img.shields.io/badge/Protocol-Pylontech%20LI2%20%7C%20CAN%20%7C%20ESP--NOW-orange.svg)](#)
@@ -9,7 +9,21 @@
 
 > 📖 **คู่มือฉบับสมบูรณ์ (ภาษาไทย & English):** อ่านรายละเอียดเชิงลึกทั้งหมดได้ที่ **[docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md](docs/HUAWEI_ESM_8PACK_GEN5_MANUAL_TH_EN.md)**
 
-An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power hybrid inverters (**MaxSky / ANENJI / PowMr EM11000 11kW**, Deye, SRNE, Growatt) using **dual-node multi-bus hardware isolation**, **2-Stage Back-EMF Parallel Balancing (`v6.5.0-PRO`)**, **Tri-Redundant Interconnect (CAN + Direct Unicast UDP + ESP-NOW)**, and **Active Discharge Load Equalization**.
+An enterprise-grade, open-source reference implementation for integrating **8x Huawei ESM-48100B1 lithium battery modules (48V 800Ah / 38.4 kWh / 120 cells)** with high-power hybrid inverters (**MaxSky / ANENJI / PowMr EM11000 11kW**, Deye, SRNE, Growatt) using **dual-node multi-bus hardware isolation**, **Explicit Smart Balancer FSM (`v6.6.0`)**, **Schmitt-Stabilized Pylontech LI2 Engine (`v6.6.0-PRO`)**, and **Tri-Redundant Interconnect (CAN + Direct Unicast UDP + ESP-NOW)**.
+
+---
+
+## 🆕 What's New in Gen 6 — v6.0.0 (Node 108 `v6.6.0` / Node 109 `v1.4.0` / LI2 `v6.6.0-PRO`)
+
+| Module / Component | File | Version | Key Gen 6 Enhancements |
+| :--- | :--- | :---: | :--- |
+| **Smart SoC-Weighted Balancer FSM** | [`huawei_smart_balancer.h`](huawei_smart_balancer.h) & [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) | **`v6.6.0`** | Explicit 5-state FSM (`NORMAL_OPEN`, `DISCH_THROTTLED`, `DISCH_RELEASING`, `CHG_DIVERTING`, `RESERVE_CUTOFF`) synchronized to `38s` polling epochs (`35s` boot settle + `1000ms` UART guard): SoC-headroom weighted fairness, `+5A/epoch` stepped release (`28A` snap to `100A`), high-SoC helper tolerance (`>= 18A` limit / `>= 14A` cap), and `2-epoch` `Mode != 3` wake debounce |
+| **Closed-Loop Compliance Watchdog** | [`huawei_smart_balancer.h`](huawei_smart_balancer.h) & [`tcan_telemetry_shared.h`](tcan_telemetry_shared.h) | **`v6.6.0`** | Added `reassert_disch` / `reassert_chg` hardware compliance checks (`>= 3.5A` over active cap or `<= -3.5A` in `RESERVE_CUTOFF`), propagated across `CAN 0x35F` + `UDP 18888` via bitflags (`0x02`/`0x04`) with `15s` twin-packet deduplication (`apply_remote_pack8_cmd()`) so peer reboots or dropped packets self-heal on the next `38s` epoch |
+| **Safe Modbus Wake & RAM Refresh** | [`tcan_telemetry_shared.h`](tcan_telemetry_shared.h) | **`v6.6.0`** | Replaced `0x000E = 3` writes (rejected by Huawei ESM with FC `0x10` Exception 2) with non-destructive RAM unlock refresh (`0x100B=1000`, `0x100D=1000`, plus `0xB798=0` only for Batch 3+ `idx >= 4`) under monotonic `180s -> 300s -> 600s` backoff |
+| **Schmitt-Stabilized DCL & Anti-Chatter** | [`huawei_smart_balancer.h`](huawei_smart_balancer.h) & [`pylontech_emulator.h`](components_v4/pylontech_emulator/pylontech_emulator.h) | **`v1.4.0` / `v6.6.0-PRO`** | `PylontechDclStabilizer` applies independent Schmitt hysteresis (`dv_tier_` `0.50V/0.70V`, `cd_tier_` `12A/17A` enter vs `8.5A/13A` exit, `surge_active_`) + `10s` upward dwell and atomic `limit_100ma`/`g_li2_throttling_reason`; separated charge protection (`chg_curr_delta >= 22A`, `pi >= 0.5A`, `last_chg_guard_mask_`) and moved `Inverter RX` logging to `ESP_LOGV` to eliminate component latency stalls |
+| **Bridge & UDP Hardening + Tests** | [`huawei-esm-tcan-inverter-bridge.yaml`](huawei-esm-tcan-inverter-bridge.yaml) & [`test_huawei_smart_balancer.py`](tests/test_huawei_smart_balancer.py) | **`v1.4.0`** | Added 8-iteration `UDP 18888` drain loop, CAN freshness gate on `0xAA 0x55` publish, `std::isfinite` Pack 8 guards, strict `m8 != 3` (`>= 30s`) Pack 8 wake fallback (`180s` cooldown), and automated contract tests (`unittest`) |
+
+*(Includes intermediate commits `v5.5.0`–`v5.6.3`: autonomous boot RAM-only unlock & `0x101B` factory restore button, Gen 5 54-column MicroSD CSV logger on Node 109 `:8080`, `Li2 Calibration Boost (53.6V)` switch, and full-range Case B morning solar diversion.)*
 
 ---
 
@@ -82,7 +96,7 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
 
 ---
 
-## 📐 System Architecture (Gen 5 Dual-Node Topology)
+## 📐 System Architecture (Gen 6 Dual-Node Topology)
 
 ```
                                   48V DC High-Capacity Busbar (800Ah / 38.4 kWh / 120 Cells)
@@ -94,10 +108,10 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
     ▼ (GPIO 33/32)              ▼ (GPIO 18/25)                                  ▼ (GPIO 18/25)              │ RS232 Pylontech LI2
 ┌─────────────────────────────────────────┐                                 ┌───────────────────────────────┴───────────┐
 │ Node 108: BMS Master (192.168.8.108)    │  1. CAN Bus 500kbps (GPIO27/26) │ Node 109: Inverter Bridge (192.168.8.109) │
-│ - Deterministic 8-Pack Modbus Engine    │◄───────────────────────────────►│ - Pylontech LI2 Emulator (v6.5.0-PRO)     │
-│ - 120-Cell Max/Min Aggregator           │  2. Direct Unicast UDP 5005/18888│ - 2-Stage Parallel Balancing (52.5->52.8V)│
-│ - Auto-Equalizer & CAN 0x35F Wake TX    │◄───────────────────────────────►│ - Asymmetric Voltage & Current Slew-Rate  │
-│ - v6.5.0 Firmware                       │  3. ESP-NOW Failover (<2000ms)   │ - v1.3.0 Firmware + MicroSD CSV Logger    │
+│ - Deterministic 8-Pack Modbus Engine    │◄───────────────────────────────►│ - Pylontech LI2 Emulator (v6.6.0-PRO)     │
+│ - HuaweiSmartBalancer 38s FSM           │  2. Direct Unicast UDP 5005/18888│ - PylontechDclStabilizer Schmitt FSM    │
+│ - Closed-Loop Re-Assert & CAN 0x35F TX  │◄───────────────────────────────►│ - Deduped Pack 8 Slot (CAN + UDP 18888)   │
+│ - v6.6.0 Firmware                       │  3. ESP-NOW Failover (<2000ms)   │ - v1.4.0 Firmware + MicroSD CSV Logger    │
 └─────────────────────────────────────────┘                                 └───────────────────────────────────────────┘
 ```
 
@@ -108,13 +122,16 @@ An enterprise-grade, open-source reference implementation for integrating **8x H
 ### 1. Configure Wi-Fi Credentials
 Edit `YOUR_WIFI_SSID` and `YOUR_WIFI_PASSWORD` in [`huawei-esm-t-can485-8pack.yaml`](huawei-esm-t-can485-8pack.yaml) and [`huawei-esm-tcan-inverter-bridge.yaml`](huawei-esm-tcan-inverter-bridge.yaml) (or use the git-ignored `*-prod.yaml` files for production deployments).
 
-### 2. Compile & Upload Firmware
+### 2. Run Firmware Contract Tests, Compile & Upload
 ```bash
-# Node 109: Inverter Bridge & Pack 8 Controller (v1.3.0)
+# Verify FSM & dual-version YAML parity contracts
+python -m unittest -v tests/test_huawei_smart_balancer.py
+
+# Node 109: Inverter Bridge & Pack 8 Controller (v1.4.0)
 esphome compile huawei-esm-tcan-inverter-bridge.yaml
 esphome upload --device 192.168.8.109 huawei-esm-tcan-inverter-bridge.yaml
 
-# Node 108: 8-Pack BMS Master Controller (v6.5.0)
+# Node 108: 8-Pack BMS Master Controller (v6.6.0)
 esphome compile huawei-esm-t-can485-8pack.yaml
 esphome upload --device 192.168.8.108 huawei-esm-t-can485-8pack.yaml
 ```

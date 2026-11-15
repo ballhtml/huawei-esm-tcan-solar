@@ -1,7 +1,10 @@
 # ==============================================================================
 # ESPHome Configuration for LILYGO T-CAN485 + Huawei ESM-48100B1 BMS (8-Pack Ready)
-# Version: 6.5.0 (Gen 5: 2-Stage Parallel Balancing + Cross-Node CAN 0x35F Auto-Wake)
+# Version: 6.6.0 (Gen 6: Smart SOC-Weighted Balancer FSM + Epoch Sync + Stepped Release)
 # Changelog:
+#   - v6.6.0: Replaced bang-bang equalizer with HuaweiSmartBalancer FSM (38s epoch sync,
+#             SOC-headroom weighted fairness, +5A/epoch stepped release, 2-epoch wake debounce)
+#             Enforced monotonic 180s->300s->600s wake backoff & Batch 1/2 0xB798 protection
 #   - v6.5.0: Added Tri-Redundant MaxCell/MinCell Sync across CAN (0x355), UDP (18888/5005), & ESP-NOW
 #             Added Cross-Node CAN (0x35F) Auto-Wake command for Pack 8 on Board 109 Port 2
 #             Fixed ESP-NOW online_mask to use true per-pack bitmask (1U << idx)
@@ -18,6 +21,7 @@ esphome:
   build_path: C:\esphome_build\tcanesm
   includes:
     - tcan_telemetry_shared.h
+    - huawei_smart_balancer.h
   platformio_options:
     build_flags:
       - "-mlongcalls"
@@ -57,6 +61,7 @@ esphome:
       - light.turn_off:
           id: board_status_led
           transition_length: 0s
+      - delay: 1000ms
       - script.execute: modbus_polling_loop
 
 esp32:
@@ -526,295 +531,90 @@ interval:
           }
           tcan_broadcast_telemetry(cyd_pkt);
 
-          // Smart Active Current Equalizer & Mode-3 Synchronizer (RAM 0x100B / 0x100D / 0x000E / 0xB798):
-          // 1. Discharge Imbalance: If total discharge <= -6.0A and any pack hogs current (< fair_share * 1.60 and <= -5.5A)
-          //    while other usable packs (SOC > 18%, V > 47.5V) are stuck in Mode 2 or lagging (< 45% of fair share),
-          //    throttle the hogging pack's RAM Discharge Limit Coef (0x100B) to force a slight busbar dip (~0.3V)
-          //    that forward-biases sleeping packs into Mode 3 (Discharge), while sending 0x100B=1000 & Mode 3 to lagging packs.
-          // 2. Restore: Automatically restore 0x100B=1000 (100A) once load sharing equalizes or discharge ends.
-          // 3. Solar Charge Imbalance: Ensure 0x100D=1000 & 0x100B=1000 on any pack lagging during solar charging (>= +12.0A).
-          static uint32_t s_last_auto_equalize_ms = 0;
+          // Smart Balancer FSM & Epoch-Synchronized Equalizer (Gen 6: HuaweiSmartBalancer)
+          // Evaluates on 38s poll epochs (> 35s Modbus sweep) + emergency overshoot guard,
+          // using SOC-headroom weighted fairness, +5A/epoch stepped release, and 2-epoch wake debounce.
+          static huawei_smart_ctrl::HuaweiSmartBalancer s_smart_balancer;
           esphome::sensor::Sensor* p_mode[8] = {
             id(pack1_bms_operating_mode), id(pack2_bms_operating_mode), id(pack3_bms_operating_mode), id(pack4_bms_operating_mode),
             id(pack5_bms_operating_mode), id(pack6_bms_operating_mode), id(pack7_bms_operating_mode), id(pack8_bms_operating_mode)
           };
 
-          if (s_last_auto_equalize_ms == 0 || (millis() - s_last_auto_equalize_ms > 30000)) {
-            float total_i = 0.0f;
-            int usable_disch = 0;
-            int sleeping_m2 = 0;
-            int lagging_disch = 0;
-            int lead_disch_pack = -1;
-            float min_pi = 0.0f;
-            int lead_chg_pack = -1;
-            float max_pi = 0.0f;
-            float min_soc = 100.0f;
-            float max_soc = 0.0f;
-
-            for (int idx = 0; idx < 7; idx++) {
-              if (!is_pack_fresh(idx, 90000)) {
-                g_eq_eeprom_unlocked[idx] = false;
-              }
+          for (int idx = 0; idx < 7; idx++) {
+            if (!is_pack_fresh(idx, 90000)) {
+              g_eq_eeprom_unlocked[idx] = false;
             }
+          }
 
-            for (int idx = 0; idx < 8; idx++) {
-              uint32_t max_age = (idx == 7) ? 30000 : 90000;
-              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-              float pi = p_i[idx]->state;
-              float pv = p_v[idx]->state;
-              float psoc = p_soc[idx]->state;
-              if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
-              total_i += pi;
-              if (psoc > 25.0f && pv > 48.0f) {
-                usable_disch++;
-              }
-              if (pi < min_pi) {
-                min_pi = pi;
-                lead_disch_pack = idx + 1;
-              }
-              if (pi > max_pi) {
-                max_pi = pi;
-                lead_chg_pack = idx + 1;
-              }
-              if (psoc < min_soc) min_soc = psoc;
-              if (psoc > max_soc) max_soc = psoc;
+          huawei_smart_ctrl::PackInput bal_in[8]{};
+          for (int idx = 0; idx < 8; idx++) {
+            uint32_t max_age = (idx == 7) ? 30000 : 90000;
+            float pi = p_i[idx]->state;
+            float pv = p_v[idx]->state;
+            float psoc = p_soc[idx]->state;
+            float pmd = p_mode[idx]->state;
+            bool valid = p_mon[idx]->state && is_pack_fresh(idx, max_age) &&
+                         std::isfinite(pi) && std::isfinite(pv) && std::isfinite(psoc);
+            bal_in[idx].online = valid;
+            if (valid) {
+              bal_in[idx].current_a = pi;
+              bal_in[idx].voltage_v = pv;
+              bal_in[idx].soc_pct = psoc;
+              bal_in[idx].mode = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
             }
+          }
 
-            float fair_disch_i = (usable_disch > 0) ? (total_i / (float)usable_disch) : 0.0f;
-            if (total_i <= -4.0f && usable_disch >= 2) {
-              for (int idx = 0; idx < 8; idx++) {
-                uint32_t max_age = (idx == 7) ? 30000 : 90000;
-                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-                float pi = p_i[idx]->state;
-                float pv = p_v[idx]->state;
-                float psoc = p_soc[idx]->state;
-                float pmd = p_mode[idx]->state;
-                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
-                int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
-                if (mode_int != 3) sleeping_m2++;
-                if (pi > (fair_disch_i * 0.50f) || mode_int != 3) lagging_disch++;
-              }
+          auto bal_sum = s_smart_balancer.evaluate(bal_in, millis());
+          for (int idx = 0; idx < 8; idx++) {
+            const auto &pc = s_smart_balancer.pack(idx);
+            if (bal_sum.balance_eval_ran || pc.dirty) {
+              g_eq_force_mode3[idx] = pc.force_wake ? 1 : 0;
             }
-
-            int active_disch_packs = 0;
-            for (int idx = 0; idx < 8; idx++) {
-              uint32_t max_age = (idx == 7) ? 30000 : 90000;
-              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-              if (p_i[idx]->state <= -1.0f) active_disch_packs++;
+            if (pc.dirty) {
+              g_eq_disch_coef[idx] = pc.disch_coef;
+              g_eq_chg_coef[idx] = pc.chg_coef;
+              if (pc.reassert_disch) g_eq_reassert_disch[idx] = true;
+              if (pc.reassert_chg) g_eq_reassert_chg[idx] = true;
+              g_eq_cmd_pending[idx] = true;
             }
+          }
 
-            uint8_t cmd_mask = 0;
-            // Case A: Discharge Imbalance / Hogging Pack or Sleeping Packs (Threshold: <= -4.0A / ~200W)
-            if (total_i <= -4.0f && usable_disch >= 2 && (sleeping_m2 > 0 || (min_pi <= -4.0f && lagging_disch > 0))) {
-              for (int idx = 0; idx < 8; idx++) {
-                uint32_t max_age = (idx == 7) ? 30000 : 90000;
-                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-                float pi = p_i[idx]->state;
-                float pv = p_v[idx]->state;
-                float psoc = p_soc[idx]->state;
-                float pmd = p_mode[idx]->state;
-                if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc) || psoc <= 25.0f || pv <= 48.0f) continue;
-                int mode_int = std::isfinite(pmd) ? (int)(pmd + 0.5f) : 2;
-
-                if (mode_int != 3 || (pi > -0.5f && total_i <= -8.0f)) {
-                  // Sleeping (Mode 2) or stuck at 0A under load: force 100A DCL wide open and send Mode 3 wake!
-                  g_eq_disch_coef[idx] = 1000;
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 1;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                } else if (pi <= -5.0f && pi < (fair_disch_i * 1.25f)) {
-                  // This pack is hogging the discharge load: throttle 0x100B smoothly to 1.15x fair share (2.0A only if single pack hogs all)
-                  uint16_t throttle_coef = 20;
-                  if (active_disch_packs > 1 || sleeping_m2 == 0) {
-                    float target_a = std::max(4.0f, (-fair_disch_i) * 1.15f);
-                    throttle_coef = (uint16_t)std::min(1000.0f, target_a * 10.0f);
-                  }
-                  if (g_eq_last_disch_coef[idx] != throttle_coef) {
-                    g_eq_disch_coef[idx] = throttle_coef;
-                    g_eq_chg_coef[idx] = 1000;
-                    g_eq_force_mode3[idx] = 0;
-                    g_eq_cmd_pending[idx] = true;
-                    cmd_mask |= (uint8_t)(1U << idx);
-                  }
-                } else if (g_eq_last_disch_coef[idx] < 1000) {
-                  // Previously throttled pack is no longer hogging: immediately release back to 1000 (100A) to stop ping-pong!
-                  g_eq_disch_coef[idx] = 1000;
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 0;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                }
-              }
-            } else if (total_i > -2.5f) {
-              // Restore previously throttled packs back to 1000 (100A) when discharge has ended
-              for (int idx = 0; idx < 8; idx++) {
-                if (g_eq_last_disch_coef[idx] < 1000) {
-                  g_eq_disch_coef[idx] = 1000;
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_force_mode3[idx] = 0;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                }
-              }
-            }
-
-            // Case B: Gen 5 Dynamic Solar Charge Equalizer (Active Diversion across Low/Mid/High Sun)
-            // Runs whenever total_i >= 4.0A AND SOC spread >= 8% (with lagging pack < 92%).
-            // Works at ANY SOC level when spread >= 18% (morning equalization) as well as top-end (>= 88%/93%),
-            // with voltage hysteresis latch (releases at 53.20V, re-arms below 51.80V) to prevent ping-pong.
-            static bool s_caseb_voltage_done = false;
-            if (total_i < 2.0f) s_caseb_voltage_done = false;
-
-            if (total_i >= 4.0f && max_soc > min_soc && (max_soc - min_soc) >= 8.0f && min_soc < 92.0f) {
-              int high_count = 0;
-              int hungry_count = 0;
-              float max_hungry_v = 0.0f;
-
-              for (int idx = 0; idx < 8; idx++) {
-                uint32_t max_age = (idx == 7) ? 30000 : 90000;
-                if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-                float pv = p_v[idx]->state;
-                float psoc = p_soc[idx]->state;
-                if (!std::isfinite(pv) || !std::isfinite(psoc)) continue;
-
-                bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
-                               (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
-                               (psoc >= (min_soc + 18.0f)) ||
-                               (pv >= 53.0f);
-                if (is_high) {
-                  high_count++;
-                } else {
-                  hungry_count++;
-                  if (pv > max_hungry_v) max_hungry_v = pv;
-                }
-              }
-
-              if (hungry_count > 0) {
-                if (max_hungry_v >= 53.20f) s_caseb_voltage_done = true;
-                else if (max_hungry_v < 51.80f) s_caseb_voltage_done = false;
-              }
-
-              if (high_count > 0 && hungry_count > 0 && !s_caseb_voltage_done) {
-                float hungry_target_a = 20.0f * (float)hungry_count;
-                float excess_a = std::max(0.0f, total_i - hungry_target_a);
-                float per_high_a = excess_a / (float)high_count;
-                uint16_t raw_coef = (uint16_t)std::min(1000.0f, std::max(20.0f, per_high_a * 10.0f));
-                uint16_t dyn_chg_coef = ((raw_coef + 5) / 10) * 10;
-                uint8_t pre_mask = cmd_mask;
-
-                for (int idx = 0; idx < 8; idx++) {
-                  uint32_t max_age = (idx == 7) ? 30000 : 90000;
-                  if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-                  float pv = p_v[idx]->state;
-                  float psoc = p_soc[idx]->state;
-                  if (!std::isfinite(pv) || !std::isfinite(psoc)) continue;
-
-                  bool is_high = (psoc >= 93.0f && psoc >= (min_soc + 8.0f)) ||
-                                 (psoc >= 88.0f && min_soc < 78.0f && psoc >= (min_soc + 15.0f)) ||
-                                 (psoc >= (min_soc + 18.0f)) ||
-                                 (pv >= 53.0f);
-                  if (is_high) {
-                    if (g_eq_last_chg_coef[idx] != dyn_chg_coef) {
-                      g_eq_chg_coef[idx] = dyn_chg_coef;
-                      g_eq_disch_coef[idx] = 1000;
-                      g_eq_force_mode3[idx] = 0;
-                      g_eq_cmd_pending[idx] = true;
-                      cmd_mask |= (uint8_t)(1U << idx);
-                    }
-                  } else if (g_eq_last_chg_coef[idx] < 1000) {
-                    g_eq_chg_coef[idx] = 1000;
-                    g_eq_disch_coef[idx] = 1000;
-                    g_eq_force_mode3[idx] = 0;
-                    g_eq_cmd_pending[idx] = true;
-                    cmd_mask |= (uint8_t)(1U << idx);
-                  }
-                }
-                if (cmd_mask != pre_mask) {
-                  ESP_LOGW("auto_equalizer",
-                           "Solar Charge Divert: Total=%.1fA MinSOC=%.0f%% MaxSOC=%.0f%% HighCap=%.1fA Hungry=%d High=%d",
-                           total_i, min_soc, max_soc, dyn_chg_coef * 0.1f, hungry_count, high_count);
-                }
-              } else {
-                for (int idx = 0; idx < 8; idx++) {
-                  if (g_eq_last_chg_coef[idx] < 1000) {
-                    g_eq_chg_coef[idx] = 1000;
-                    g_eq_cmd_pending[idx] = true;
-                    cmd_mask |= (uint8_t)(1U << idx);
-                  }
-                }
-              }
-            } else {
-              // Charging stopped or bank already balanced: restore all charge limits back to 1000 (100A)
-              for (int idx = 0; idx < 8; idx++) {
-                if (g_eq_last_chg_coef[idx] < 1000) {
-                  g_eq_chg_coef[idx] = 1000;
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                }
-              }
-            }
-
-            // Case C: Individual Pack 25% Reserve Standby Floor Protection (SoC <= 25.0% or Voltage <= 48.0V)
-            // Cuts off discharge (DCL=0A in RAM) to preserve reserve WITHOUT touching Mode 2 (prevents BMS latch)!
-            for (int idx = 0; idx < 8; idx++) {
-              uint32_t max_age = (idx == 7) ? 30000 : 90000;
-              if (!p_mon[idx]->state || !is_pack_fresh(idx, max_age)) continue;
-              float pi = p_i[idx]->state;
-              float pv = p_v[idx]->state;
-              float psoc = p_soc[idx]->state;
-              if (!std::isfinite(pi) || !std::isfinite(pv) || !std::isfinite(psoc)) continue;
-
-              if (psoc <= 25.0f || pv <= 48.0f) {
-                if (g_eq_disch_coef[idx] > 0 || g_eq_last_disch_coef[idx] > 0) {
-                  g_eq_disch_coef[idx] = 0;   // 0.0A DCL in RAM: Stop discharging immediately!
-                  g_eq_chg_coef[idx] = 1000;  // Keep 100A CCL open so solar charging works instantly
-                  g_eq_force_mode3[idx] = 0;  // NEVER write Mode 2: keep BMS fully online & ready to charge!
-                  g_eq_cmd_pending[idx] = true;
-                  cmd_mask |= (uint8_t)(1U << idx);
-                  ESP_LOGW("auto_equalizer", "Pack %d hit 25%% reserve floor (SoC=%.1f%%, V=%.2fV) -> DCL=0A", idx + 1, psoc, pv);
-                }
-              } else if (psoc >= 30.0f && g_eq_disch_coef[idx] == 0) {
-                // Hysteresis recovery: once recharged above 30%, restore DCL to 1000 (100A)
-                g_eq_disch_coef[idx] = 1000;
-                g_eq_chg_coef[idx] = 1000;
-                g_eq_force_mode3[idx] = 0;
-                g_eq_cmd_pending[idx] = true;
-                cmd_mask |= (uint8_t)(1U << idx);
-                ESP_LOGW("auto_equalizer", "Pack %d recovered above 30%% (SoC=%.1f%%, V=%.2fV) -> Restoring DCL=100A", idx + 1, psoc, pv);
-              }
-            }
-
-            if (cmd_mask != 0) {
-              s_last_auto_equalize_ms = millis();
-              ESP_LOGW("auto_equalizer",
-                       "Equalizer active (Total=%.1fA, Fair=%.1fA, Lead=P%d:%.1fA, SleepM2=%d). Mask=0x%02X",
-                       total_i, fair_disch_i, lead_disch_pack, min_pi, sleeping_m2, cmd_mask);
-              if (cmd_mask & (1U << 7)) {
-                uint16_t c8 = g_eq_disch_coef[7];
-                uint16_t chg8 = g_eq_chg_coef[7];
-                uint8_t fm3 = g_eq_force_mode3[7];
-                g_eq_last_disch_coef[7] = c8;
-                g_eq_last_chg_coef[7] = chg8;
-                g_eq_cmd_pending[7] = false;
-                std::vector<uint8_t> d_wake = {
-                  0x57, 0x4B, 0x08, fm3,
+          if (bal_sum.cmd_mask != 0) {
+            ESP_LOGW("auto_equalizer",
+                     "SmartBalancer (%s): Total=%.1fA Fair=%.1fA Lead=P%d:%.1fA Usable=%d SleepM2=%d ChgDiv=%d Mask=0x%02X",
+                     bal_sum.balance_eval_ran ? "epoch" : "guard",
+                     bal_sum.total_i, bal_sum.fair_disch_i, bal_sum.lead_disch_pack,
+                     bal_sum.min_pi, bal_sum.usable_disch, bal_sum.sleeping_m2,
+                     bal_sum.charge_divert_active ? 1 : 0, bal_sum.cmd_mask);
+            if (bal_sum.cmd_mask & (1U << 7)) {
+              const auto &p8 = s_smart_balancer.pack(7);
+              uint16_t c8 = p8.disch_coef;
+              uint16_t chg8 = p8.chg_coef;
+              uint8_t fm3 = (p8.force_wake ? 0x01 : 0x00) |
+                            (p8.reassert_disch ? 0x02 : 0x00) |
+                            (p8.reassert_chg ? 0x04 : 0x00);
+              g_eq_last_disch_coef[7] = c8;
+              g_eq_last_chg_coef[7] = chg8;
+              g_eq_reassert_disch[7] = false;
+              g_eq_reassert_chg[7] = false;
+              g_eq_cmd_pending[7] = false;
+              std::vector<uint8_t> d_wake = {
+                0x57, 0x4B, 0x08, fm3,
+                (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF),
+                (uint8_t)(chg8 & 0xFF), (uint8_t)((chg8 >> 8) & 0xFF)
+              };
+              id(interconnect_can_bus).send_data(0x35F, false, d_wake);
+              if (s_udp_109 >= 0) {
+                struct sockaddr_in w_addr = {};
+                w_addr.sin_family = AF_INET;
+                w_addr.sin_port = htons(18888);
+                w_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
+                uint8_t wpkt[9] = {
+                  0xAA, 0x57, 0x4B, 0x08, fm3,
                   (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF),
                   (uint8_t)(chg8 & 0xFF), (uint8_t)((chg8 >> 8) & 0xFF)
                 };
-                id(interconnect_can_bus).send_data(0x35F, false, d_wake);
-                if (s_udp_109 >= 0) {
-                  struct sockaddr_in w_addr = {};
-                  w_addr.sin_family = AF_INET;
-                  w_addr.sin_port = htons(18888);
-                  w_addr.sin_addr.s_addr = inet_addr("192.168.8.109");
-                  uint8_t wpkt[9] = {
-                    0xAA, 0x57, 0x4B, 0x08, fm3,
-                    (uint8_t)(c8 & 0xFF), (uint8_t)((c8 >> 8) & 0xFF),
-                    (uint8_t)(chg8 & 0xFF), (uint8_t)((chg8 >> 8) & 0xFF)
-                  };
-                  ::sendto(s_udp_109, wpkt, sizeof(wpkt), 0, (struct sockaddr *)&w_addr, sizeof(w_addr));
-                }
+                ::sendto(s_udp_109, wpkt, sizeof(wpkt), 0, (struct sockaddr *)&w_addr, sizeof(w_addr));
               }
             }
           }

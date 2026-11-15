@@ -1,5 +1,5 @@
 // pylontech_emulator.h — Pylontech BMS Protocol Emulator for ESPHome
-// Version 6.5.0-PRO (Gen 5: Continuous 2-Stage Parallel Balancing & Active Load Equalization)
+// Version 6.6.0-PRO (Gen 6: Smart Predictive Balancer, DCL Stabilizer & Active Wake)
 // Fixes Applied:
 //  1. Strict Hex-Encoded ASCII for String IDs (CID2 0x51, 0x93, 0x94, 0x95)
 //  2. High-EMI Noise Immunity Filter (No early buffer drop on burst noise during >60A / 3000W charge)
@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include "tcan_telemetry_shared.h"
+#include "huawei_smart_balancer.h"
 
 namespace esphome {
 namespace pylontech_emulator {
@@ -50,7 +51,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       gpio_set_direction((gpio_num_t)tx_enable_pin_, GPIO_MODE_OUTPUT);
       gpio_set_level((gpio_num_t)tx_enable_pin_, 0);  // RX mode default
     }
-    ESP_LOGI(TAG, "Pylontech Emulator v6.5.0-PRO (Gen 5) Initialized (flow_ctrl_pin=%d)", tx_enable_pin_);
+    ESP_LOGI(TAG, "Pylontech Emulator v6.6.0-PRO (Gen 6) Initialized (flow_ctrl_pin=%d)", tx_enable_pin_);
   }
 
   void loop() override {
@@ -66,7 +67,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       uint8_t byte;
       read_byte(&byte);
       raw_rx_count_++;
-      ESP_LOGI(TAG, "Inverter RX [%lu]: 0x%02X ('%c')", (unsigned long)raw_rx_count_, byte, (byte >= 32 && byte <= 126) ? (char)byte : '.');
+      ESP_LOGV(TAG, "Inverter RX [%lu]: 0x%02X ('%c')", (unsigned long)raw_rx_count_, byte, (byte >= 32 && byte <= 126) ? (char)byte : '.');
 
       if (byte == '~') {
         // Start of Frame (SOI)
@@ -145,6 +146,9 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
 
   uint32_t full_charge_start_ms_{0};
   bool full_charge_calibrated_{false};
+
+  huawei_smart_ctrl::PylontechDclStabilizer dcl_stabilizer_;
+  uint8_t last_chg_guard_mask_{0};
 
   uint32_t last_telemetry_ms_{0};
 
@@ -287,8 +291,10 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
   uint16_t get_dynamic_charge_limit_100ma() {
     update_protection_states();
     if (!is_bms_data_fresh() || !charge_enabled_) {
+      g_li2_throttling_reason = !is_bms_data_fresh() ? "BMS_OFFLINE (0A)" : "CHARGE_PROHIBITED (0A)";
       g_li2_charge_limit_a = 0.0f;
       current_charge_limit_100ma_ = 0;
+      last_chg_guard_mask_ = 0;
       return 0;    // 0.0A when full or BMS stale
     }
     float soc = get_soc();
@@ -344,14 +350,18 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     }
 
     // Layer 2 Safety: Pack Cable / Busbar Imbalance Guard
+    uint8_t chg_guard_mask = 0;
     if (v >= 52.0f && pack_delta_v >= 0.6f) {
       target_limit = std::min(target_limit, (uint16_t)600); // 60.0A Cable protection
-      ESP_LOGW(TAG, "PACK DELTA HIGH: %.2fV delta -> Tapered to 60.0A", pack_delta_v);
+      chg_guard_mask |= 0x01;
+      if (!(last_chg_guard_mask_ & 0x01)) {
+        ESP_LOGW(TAG, "PACK DELTA HIGH: %.2fV delta -> Tapered to 60.0A", pack_delta_v);
+      }
     }
 
     // Single-Pack Overcurrent & Imbalance Guard
-    // Note: During Staging Parallel Balancing, full packs naturally float at ~0.5A while hungry packs take 15-20A.
-    // Do NOT choke CCL on chg_curr_delta during Staging Parallel Balancing unless a single pack exceeds 24.0A!
+    // Note: During Charge Divert balancing, full packs intentionally cap to ~3A while hungry packs take 15-20A.
+    // Threshold raised to >= 22.0A (and ignore standby < 0.5A) so Node 108 charge diversion is not choked down to 60A.
     float min_pack_chg_i = 999.0f;
     float max_pack_chg_i = -999.0f;
     int active_chg_count = 0;
@@ -359,7 +369,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       if (p < 7 && !direct_ok) continue;
       if (!g_tcan_direct_pkt.packs[p].is_online) continue;
       float pi = g_tcan_direct_pkt.packs[p].current_x10 * 0.1f;
-      if (pi > 0.0f) {
+      if (pi >= 0.5f) {
         if (pi < min_pack_chg_i) min_pack_chg_i = pi;
         if (pi > max_pack_chg_i) max_pack_chg_i = pi;
         active_chg_count++;
@@ -368,11 +378,18 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     float chg_curr_delta = (active_chg_count > 1 && max_pack_chg_i > min_pack_chg_i) ? (max_pack_chg_i - min_pack_chg_i) : 0.0f;
     if (max_pack_chg_i >= 24.0f) {
       target_limit = std::min(target_limit, (uint16_t)800); // 80.0A single-pack >0.24C guard
-      ESP_LOGW(TAG, "SINGLE PACK HIGH CHARGE: %.1fA -> Tapered to 80.0A", max_pack_chg_i);
-    } else if (!in_staging_balance && v >= 51.5f && chg_curr_delta >= 14.0f) {
+      chg_guard_mask |= 0x02;
+      if (!(last_chg_guard_mask_ & 0x02)) {
+        ESP_LOGW(TAG, "SINGLE PACK HIGH CHARGE: %.1fA -> Tapered to 80.0A", max_pack_chg_i);
+      }
+    } else if (!in_staging_balance && v >= 51.5f && chg_curr_delta >= 22.0f) {
       target_limit = std::min(target_limit, (uint16_t)600); // 60.0A balance charge
-      ESP_LOGW(TAG, "PACK CHARGE IMBALANCE: Delta %.1fA -> Tapered to 60.0A", chg_curr_delta);
+      chg_guard_mask |= 0x04;
+      if (!(last_chg_guard_mask_ & 0x04)) {
+        ESP_LOGW(TAG, "PACK CHARGE IMBALANCE: Delta %.1fA -> Tapered to 60.0A", chg_curr_delta);
+      }
     }
+    last_chg_guard_mask_ = chg_guard_mask;
 
     // Preventive thermal derating
     if (temp >= 50.0f) {
@@ -403,25 +420,12 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     // Feature 2: Determine Live Throttling Reason (Charge & Discharge aware)
     if (!is_bms_data_fresh()) {
       g_li2_throttling_reason = "BMS_OFFLINE (0A)";
-    } else if (!discharge_enabled_ && cur_a < -1.0f) {
+    } else if (!discharge_enabled_ && (cur_a < -1.0f || (low_cutoff_latched_ && cur_a <= 0.5f))) {
       g_li2_throttling_reason = "DISCHARGE_CUTOFF (0A)";
     } else if (!charge_enabled_) {
       g_li2_throttling_reason = "CHARGE_PROHIBITED (0A)";
     } else if (cur_a < -2.0f) {
-      // Discharging status (will be refined by get_dynamic_discharge_limit_100ma)
-      if (min_cell > 1500 && min_cell <= 3020) {
-        g_li2_throttling_reason = "DCL_KNEE_3.02V (20A)";
-      } else if (min_cell > 1500 && min_cell <= 3080 || soc <= 18.0f) {
-        g_li2_throttling_reason = "DCL_FLOOR_3.08V (40A)";
-      } else if (min_cell > 1500 && min_cell <= 3150 || soc <= 25.0f) {
-        g_li2_throttling_reason = "DCL_SOFT_3.15V (80A)";
-      } else if (min_cell > 1500 && min_cell <= 3200) {
-        g_li2_throttling_reason = "DCL_STEP_3.20V (140A)";
-      } else if (pack_delta_v >= 0.40f) {
-        g_li2_throttling_reason = "DCL_EQUALIZING (100A)";
-      } else {
-        g_li2_throttling_reason = "DISCHARGE_NORMAL (250A)";
-      }
+      // Discharging DCL and reason are owned atomically by get_dynamic_discharge_limit_100ma()
     } else if (max_cell >= 3620) {
       g_li2_throttling_reason = "EMERGENCY_SPIKE_3.62V (0A)";
     } else if (max_cell >= 3580) {
@@ -436,16 +440,20 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       }
     } else if (soc >= 98.0f || (v >= 53.2f && min_cell >= 3420)) {
       g_li2_throttling_reason = "FLOAT_BALANCE (20A)";
-    } else if (soc >= 94.0f && min_cell >= 3400) {
-      g_li2_throttling_reason = "ABSORPTION_TOPUP (60A)";
-    } else if (max_cell >= 3540) {
-      g_li2_throttling_reason = "ABSORPTION_CLAMP (40A)";
-    } else if (pack_delta_v >= 0.6f && v >= 52.0f) {
-      g_li2_throttling_reason = "PACK_DELTA_GUARD (60A)";
     } else if (temp >= 50.0f) {
       g_li2_throttling_reason = "HIGH_TEMP_DERATE (20A)";
+    } else if (max_cell >= 3540) {
+      g_li2_throttling_reason = "ABSORPTION_CLAMP (40A)";
+    } else if (soc >= 94.0f && min_cell >= 3400) {
+      g_li2_throttling_reason = "ABSORPTION_TOPUP (60A)";
+    } else if (pack_delta_v >= 0.6f && v >= 52.0f) {
+      g_li2_throttling_reason = "PACK_DELTA_GUARD (60A)";
+    } else if (chg_curr_delta >= 22.0f && v >= 51.5f && max_pack_chg_i < 24.0f) {
+      g_li2_throttling_reason = "PACK_CHG_IMBALANCE (60A)";
     } else if (temp >= 46.0f) {
       g_li2_throttling_reason = "HIGH_TEMP_DERATE (60A)";
+    } else if (max_pack_chg_i >= 24.0f) {
+      g_li2_throttling_reason = "SINGLE_PACK_CHG_GUARD (80A)";
     } else {
       g_li2_throttling_reason = "NORMAL_BULK (120A)";
     }
@@ -485,6 +493,11 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
   uint16_t get_dynamic_discharge_limit_100ma() {
     update_protection_states();
     if (!is_bms_data_fresh() || !discharge_enabled_) {
+      if (!is_bms_data_fresh()) {
+        g_li2_throttling_reason = "BMS_OFFLINE (0A)";
+      } else if (get_current() <= 0.5f) {
+        g_li2_throttling_reason = "DISCHARGE_CUTOFF (0A)";
+      }
       g_li2_discharge_limit_a = 0.0f;
       return 0;    // 0.0A (Cut-off to Mains Bypass)
     }
@@ -496,12 +509,7 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
     float min_pack_v = get_min_pack_voltage_v();
     uint16_t min_cell = get_min_cell_voltage_mv();
 
-    uint16_t limit = 2500;  // 250.0A base max for 8-pack bank (~12 kW output)
-
-    // -------------------------------------------------------------
-    // Active Discharge Load Equalization (Applies from 100% to 0%)
-    // Ensures all 8 packs share load fairly; prevents pulling hard on any single pack
-    // -------------------------------------------------------------
+    // Collect online pack telemetry before evaluating hysteresis-stabilized DCL
     float max_single_pack_disch_a = 0.0f;
     float min_single_pack_disch_a = 999.0f;
     float max_pack_v = 0.0f;
@@ -514,11 +522,11 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
       if (!g_tcan_direct_pkt.packs[p].is_online) continue;
       online_packs_count++;
 
-      // Current: negative value in BMS telemetry means discharging (e.g. -25.0A -> 25.0A magnitude)
+      // Current: negative value in BMS telemetry means discharging
       float pi = g_tcan_direct_pkt.packs[p].current_x10 * 0.1f;
       float disch_i = (pi < 0.0f) ? (-pi) : 0.0f;
       if (disch_i > max_single_pack_disch_a) max_single_pack_disch_a = disch_i;
-      // Only compare active discharging packs to prevent false delta trigger from standby packs!
+      // Only compare active discharging packs to prevent false delta trigger from standby packs
       if (disch_i >= 0.5f) {
         if (disch_i < min_single_pack_disch_a) min_single_pack_disch_a = disch_i;
         active_disch_count++;
@@ -532,57 +540,30 @@ class PylontechEmulator : public Component, public uart::UARTDevice {
                              ? (max_single_pack_disch_a - min_single_pack_disch_a) : 0.0f;
     float pack_delta_v = (max_pack_v > min_pack_v && min_pack_v > 20.0f) ? (max_pack_v - min_pack_v) : 0.0f;
 
-    // Rule 1: Single Pack Surge Protection (Target: 8.0A/pack avg, floor 80A total)
-    // Only clamps if an active pack is being pulled >= 8.5A while delta between active packs >= 3.0A
-    if (max_single_pack_disch_a >= 8.5f && disch_curr_delta >= 3.0f) {
-      uint16_t balanced_cap = (uint16_t)(online_packs_count * 80); // 64.0A - 80.0A
-      limit = std::min(limit, std::max(balanced_cap, (uint16_t)800));
-      if (is_discharging) g_li2_throttling_reason = "DCL_PACK_EQUALIZING (80A)";
-      ESP_LOGW(TAG, "LOAD IMBALANCE: Pack pulling %.1fA (Delta=%.1fA) -> Capped total DCL to %.1fA",
-               max_single_pack_disch_a, disch_curr_delta, limit * 0.1f);
-    } else if (max_single_pack_disch_a >= 12.0f) {
-      // Hard cap if an outlier pack gets pulled heavily
-      limit = std::min(limit, (uint16_t)800); // 80.0A max total (~4.0 kW)
-      if (is_discharging) g_li2_throttling_reason = "DCL_OUTLIER_CLAMP (80A)";
-    }
+    huawei_smart_ctrl::DclInput in{};
+    in.soc_pct = soc;
+    in.voltage_v = v;
+    in.temp_c = temp;
+    in.current_a = cur_a;
+    in.min_pack_v = min_pack_v;
+    in.pack_delta_v = pack_delta_v;
+    in.min_cell_mv = min_cell;
+    in.max_single_pack_disch_a = max_single_pack_disch_a;
+    in.disch_curr_delta = disch_curr_delta;
+    in.online_packs_count = online_packs_count;
+    in.active_disch_count = active_disch_count;
 
-    // Rule 2: Inter-Pack Current Imbalance Guard (Active packs only)
-    if (disch_curr_delta >= 6.0f) {
-      limit = std::min(limit, (uint16_t)800); // 80.0A total (~4.0 kW)
-      if (is_discharging) g_li2_throttling_reason = "DCL_CURR_IMBALANCE (80A)";
-      ESP_LOGW(TAG, "DISCHARGE CURRENT IMBALANCE: Delta %.1fA -> Tapered DCL to 80A", disch_curr_delta);
-    } else if (disch_curr_delta >= 4.0f) {
-      limit = std::min(limit, (uint16_t)1000); // 100.0A total (~5.0 kW)
-      if (is_discharging) g_li2_throttling_reason = "DCL_CURR_IMBALANCE (100A)";
+    auto out = this->dcl_stabilizer_.evaluate(in, millis());
+    if (is_discharging) {
+      g_li2_throttling_reason = out.reason;
     }
-
-    // Rule 3: Early Voltage-Delta Equalization (Prevents pulling hard on lagging packs right from the start!)
-    if (pack_delta_v >= 0.35f) {
-      limit = std::min(limit, (uint16_t)800); // 80.0A total (~4.0 kW)
-      if (is_discharging) g_li2_throttling_reason = "DCL_DELTA_V (80A)";
-    } else if (pack_delta_v >= 0.25f) {
-      limit = std::min(limit, (uint16_t)1000); // 100.0A total (~5.0 kW)
-      if (is_discharging) g_li2_throttling_reason = "DCL_DELTA_V (100A)";
+    if (out.tier_changed) {
+      ESP_LOGW(TAG, "DCL tier -> %.1fA [%s] (dV=%.2fV, dI=%.1fA, maxI=%.1fA, minCell=%u mV)",
+               out.limit_100ma * 0.1f, out.reason, pack_delta_v, disch_curr_delta,
+               max_single_pack_disch_a, min_cell);
     }
-
-    // Stage 4: Anti-Sag & Safe Low-Knee Tapering (prevents any single weak pack from collapsing)
-    if (min_cell > 1500 && min_cell <= 3020) {
-      limit = 200;  // 20.0A emergency knee: smooth shift to grid bypass without blackout
-      ESP_LOGW(TAG, "DISCHARGE KNEE 3.02V: Min cell %u mV <= 3020 mV -> Throttled to 20.0A", min_cell);
-    } else if (soc <= 18.0f || v <= 47.5f ||
-        (min_pack_v > 20.0f && min_pack_v <= 47.0f) ||
-        (min_cell > 1500 && min_cell <= 3080)) {
-      limit = std::min(limit, (uint16_t)400);  // 40.0A critical floor
-    } else if (soc <= 24.0f || v <= 48.0f ||
-        (min_pack_v > 20.0f && min_pack_v <= 47.5f) ||
-        (min_cell > 1500 && min_cell <= 3150) ||
-        (temp >= 50.0f)) {
-      limit = std::min(limit, (uint16_t)800);  // 80.0A soft step-down (prevents sag on weak packs!)
-    } else if (min_cell > 1500 && min_cell <= 3200) {
-      limit = std::min(limit, (uint16_t)1400); // 140.0A moderate step-down
-    }
-    g_li2_discharge_limit_a = limit * 0.1f;
-    return limit;
+    g_li2_discharge_limit_a = out.limit_100ma * 0.1f;
+    return out.limit_100ma;
   }
 
   uint16_t calculate_checksum(const std::string &data) {

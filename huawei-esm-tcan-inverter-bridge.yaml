@@ -1,7 +1,11 @@
 # ==============================================================================
 # ESPHome Configuration for Board 2: LILYGO T-CAN485 (Inverter Bridge & Logger)
-# Version: 1.3.0 (Gen 5: 2-Stage Parallel Balancing + Voltage Slew-Rate + CAN 0x35F Wake)
+# Version: 1.4.0 (Gen 6: Hysteresis DCL Stabilizer + Deduped Pack 8 Wake)
 # Changelog:
+#   - v1.4.0: Delegated discharge DCL stabilization & reason ownership to PylontechDclStabilizer
+#             (Schmitt hysteresis + 10s upward dwell, fixing 213/hr chatter & split-brain reason)
+#             Added CAN 0x35F / UDP 18888 RX deduplication via apply_remote_pack8_cmd()
+#             Hardened Pack 8 fallback (strictly m8 != 3, 30s debounce, 180s cooldown)
 #   - v1.3.0: Added 2-Stage Parallel Balancing (52.5V -> 52.8V) with Asymmetric Voltage Slew-Rate
 #             Fixed MaxCell Self-Latching bug by separating g_reported_max_cell_mv
 #             Fixed DCL_DELTA_V overwriting Charge Throttling Reason when charging/idle
@@ -18,6 +22,7 @@ esphome:
   build_path: C:\esphome_build\tcan_inverter_bridge
   includes:
     - tcan_telemetry_shared.h
+    - huawei_smart_balancer.h
   platformio_options:
     build_flags:
       - "-mlongcalls"
@@ -135,21 +140,9 @@ canbus:
         then:
           - lambda: |-
               uint8_t fm3 = (x.size() >= 4) ? x[3] : 1;
-              if (fm3 == 0xEE) {
-                g_eq_restore_eeprom_pending[7] = true;
-                fm3 = 0;
-              }
               uint16_t dcoef = (x.size() >= 6) ? (uint16_t)(x[4] | (x[5] << 8)) : 1000;
               uint16_t ccoef = (x.size() >= 8) ? (uint16_t)(x[6] | (x[7] << 8)) : 1000;
-              if (dcoef < 15) dcoef = 15;
-              if (dcoef > 1000) dcoef = 1000;
-              if (ccoef < 20) ccoef = 20;
-              if (ccoef > 1000) ccoef = 1000;
-              g_eq_disch_coef[7] = dcoef;
-              g_eq_chg_coef[7] = ccoef;
-              g_eq_force_mode3[7] = fm3;
-              g_eq_cmd_pending[7] = true;
-              ESP_LOGW("auto_equalizer", "CAN 0x35F RX -> Pack 8 slot queued: 0x100B=%u, 0x100D=%u, force_m3=%u", dcoef, ccoef, fm3);
+              apply_remote_pack8_cmd(fm3, dcoef, ccoef, "CAN 0x35F");
       # Frame 0x356: Voltage (0.01V), Current (0.1A signed), Temp (0.1°C signed), MinPackV (0.01V)
       - can_id: 0x356
         then:
@@ -246,51 +239,46 @@ interval:
           if (udp_sock >= 0) {
             uint8_t buf[32];
             struct sockaddr_in src_addr;
-            socklen_t socklen = sizeof(src_addr);
-            int len = ::recvfrom(udp_sock, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &socklen);
-            if (len >= 4 && buf[0] == 0xAA && buf[1] == 0x57 && buf[2] == 0x4B && buf[3] == 0x08) {
-              uint8_t fm3 = (len >= 5) ? buf[4] : 1;
-              if (fm3 == 0xEE) {
-                g_eq_restore_eeprom_pending[7] = true;
-                fm3 = 0;
-              }
-              uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
-              uint16_t ccoef = (len >= 9) ? (uint16_t)(buf[7] | (buf[8] << 8)) : 1000;
-              if (dcoef < 15) dcoef = 15;
-              if (dcoef > 1000) dcoef = 1000;
-              if (ccoef < 20) ccoef = 20;
-              if (ccoef > 1000) ccoef = 1000;
-              g_eq_disch_coef[7] = dcoef;
-              g_eq_chg_coef[7] = ccoef;
-              g_eq_force_mode3[7] = fm3;
-              g_eq_cmd_pending[7] = true;
-            } else if (len >= 12 && buf[0] == 0xAA && buf[1] == 0x55) {
-              uint16_t soc = buf[2] | (buf[3] << 8);
-              uint16_t soh = buf[4] | (buf[5] << 8);
-              int16_t v_raw = (int16_t)(buf[6] | (buf[7] << 8));
-              int16_t i_raw = (int16_t)(buf[8] | (buf[9] << 8));
-              int16_t t_raw = (int16_t)(buf[10] | (buf[11] << 8));
-              float v = (float)v_raw * 0.01f;
-              float i = (float)i_raw * 0.1f;
-              float t = (float)t_raw * 0.1f;
-              if (soc > 0 && soc <= 100 && v > 20.0f && v < 65.0f) {
-                if (len >= 16) {
-                  uint16_t min_v_raw = (uint16_t)(buf[12] | (buf[13] << 8));
-                  uint16_t min_c_raw = (uint16_t)(buf[14] | (buf[15] << 8));
-                  if (min_v_raw > 2000 && min_v_raw < 6500) g_reported_min_pack_v = (float)min_v_raw * 0.01f;
-                  if (min_c_raw > 1500 && min_c_raw < 4500) g_reported_min_cell_mv = min_c_raw;
+            for (int iter = 0; iter < 8; iter++) {
+              socklen_t socklen = sizeof(src_addr);
+              int len = ::recvfrom(udp_sock, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &socklen);
+              if (len <= 0) break;
+              if (len >= 4 && buf[0] == 0xAA && buf[1] == 0x57 && buf[2] == 0x4B && buf[3] == 0x08) {
+                uint8_t fm3 = (len >= 5) ? buf[4] : 1;
+                uint16_t dcoef = (len >= 7) ? (uint16_t)(buf[5] | (buf[6] << 8)) : 1000;
+                uint16_t ccoef = (len >= 9) ? (uint16_t)(buf[7] | (buf[8] << 8)) : 1000;
+                apply_remote_pack8_cmd(fm3, dcoef, ccoef, "UDP 18888");
+              } else if (len >= 12 && buf[0] == 0xAA && buf[1] == 0x55) {
+                uint16_t soc = buf[2] | (buf[3] << 8);
+                uint16_t soh = buf[4] | (buf[5] << 8);
+                int16_t v_raw = (int16_t)(buf[6] | (buf[7] << 8));
+                int16_t i_raw = (int16_t)(buf[8] | (buf[9] << 8));
+                int16_t t_raw = (int16_t)(buf[10] | (buf[11] << 8));
+                float v = (float)v_raw * 0.01f;
+                float i = (float)i_raw * 0.1f;
+                float t = (float)t_raw * 0.1f;
+                if (soc > 0 && soc <= 100 && v > 20.0f && v < 65.0f) {
+                  if (len >= 16) {
+                    uint16_t min_v_raw = (uint16_t)(buf[12] | (buf[13] << 8));
+                    uint16_t min_c_raw = (uint16_t)(buf[14] | (buf[15] << 8));
+                    if (min_v_raw > 2000 && min_v_raw < 6500) g_reported_min_pack_v = (float)min_v_raw * 0.01f;
+                    if (min_c_raw > 1500 && min_c_raw < 4500) g_reported_min_cell_mv = min_c_raw;
+                  }
+                  if (len >= 18) {
+                    uint16_t max_c_raw = (uint16_t)(buf[16] | (buf[17] << 8));
+                    if (max_c_raw > 1500 && max_c_raw < 4500) g_reported_max_cell_mv = max_c_raw;
+                  }
+                  if (esphome::pylontech_emulator::g_last_can_frame_ms == 0 ||
+                      ((uint32_t)(millis() - esphome::pylontech_emulator::g_last_can_frame_ms) > 1500)) {
+                    id(can_battery_soc).publish_state(soc);
+                    id(can_battery_soh).publish_state(soh);
+                    id(can_battery_voltage).publish_state(v);
+                    id(can_battery_current).publish_state(i);
+                    id(can_battery_temp).publish_state(t);
+                    id(can_battery_power).publish_state(v * i);
+                    id(pylon_emu).ping_telemetry();
+                  }
                 }
-                if (len >= 18) {
-                  uint16_t max_c_raw = (uint16_t)(buf[16] | (buf[17] << 8));
-                  if (max_c_raw > 1500 && max_c_raw < 4500) g_reported_max_cell_mv = max_c_raw;
-                }
-                id(can_battery_soc).publish_state(soc);
-                id(can_battery_soh).publish_state(soh);
-                id(can_battery_voltage).publish_state(v);
-                id(can_battery_current).publish_state(i);
-                id(can_battery_temp).publish_state(t);
-                id(can_battery_power).publish_state(v * i);
-                id(pylon_emu).ping_telemetry();
               }
             }
           }
@@ -311,7 +299,7 @@ interval:
           float psoc8 = id(pack8_soc).state;
           float pt8 = id(pack8_max_cell_temp).state;
           uint16_t p8_cmin = 0, p8_cmax = 0;
-          if (is_pack_fresh(7, 30000) && std::isfinite(pv8) && pv8 > 20.0f) {
+          if (is_pack_fresh(7, 30000) && std::isfinite(pv8) && pv8 > 20.0f && std::isfinite(pi8) && std::isfinite(psoc8)) {
             g_tcan_direct_pkt.packs[7].is_online = 1;
             g_tcan_direct_pkt.packs[7].voltage_x100 = (int16_t)(pv8 * 100.0f);
             g_tcan_direct_pkt.packs[7].current_x10 = (int16_t)(pi8 * 10.0f);
@@ -441,14 +429,24 @@ interval:
               }
             }
 
-            // Local Autonomous Equalizer Fallback for Pack 8 (protects Pack 8 sharing even if CAN 0x35F is delayed)
+            // Local Autonomous Equalizer Fallback for Pack 8 (only fires if m8 != 3 continuously >= 30s; 180s cooldown)
             float sys_i = id(can_battery_current).state;
             if (std::isfinite(sys_i) && std::isfinite(pv8) && std::isfinite(pi8) && std::isfinite(psoc8)) {
               uint8_t m8 = std::isfinite(pmode8) ? (uint8_t)pmode8 : 2;
-              bool p8_disch_clamped = (sys_i <= -8.0f && psoc8 > 25.0f && pv8 > 48.0f && (m8 != 3 || pi8 > (sys_i / 8.0f) * 0.45f));
-              bool p8_chg_clamped = (sys_i >= 16.0f && psoc8 < 95.0f && pv8 < 53.2f && pi8 < (sys_i / 8.0f) * 0.45f);
-              if ((p8_disch_clamped || p8_chg_clamped) && g_eq_disch_coef[7] == 1000) {
-                id(wake_pack8_script).execute();
+              static uint32_t s_p8_stuck_since_ms = 0;
+              bool p8_stuck_m2 = (sys_i <= -8.0f && psoc8 > 25.0f && pv8 > 48.0f && m8 != 3 && g_eq_disch_coef[7] == 1000);
+              if (p8_stuck_m2) {
+                uint32_t now_fb = millis();
+                if (s_p8_stuck_since_ms == 0) {
+                  s_p8_stuck_since_ms = now_fb;
+                } else if (now_fb - s_p8_stuck_since_ms >= 30000) {
+                  id(wake_pack8_script).execute();
+                }
+              } else {
+                s_p8_stuck_since_ms = 0;
+                if (m8 == 3 && g_eq_force_mode3[7] != 0) {
+                  g_eq_force_mode3[7] = 0;
+                }
               }
             }
           }
@@ -597,7 +595,7 @@ script:
     then:
       - lambda: |-
           static uint32_t s_last_p8_wake_ms = 0;
-          if (s_last_p8_wake_ms != 0 && (millis() - s_last_p8_wake_ms < 20000)) {
+          if (s_last_p8_wake_ms != 0 && (millis() - s_last_p8_wake_ms < 180000)) {
             return;
           }
           s_last_p8_wake_ms = millis();

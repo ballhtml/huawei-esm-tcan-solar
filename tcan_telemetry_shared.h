@@ -353,6 +353,8 @@ inline void espnow_broadcast_pack8_summary(EspNowPack8Packet &pkt) {
 }
 #endif
 
+#include "huawei_smart_balancer.h"
+
 // -----------------------------------------------------------------------------
 // Active Current Equalizer & Mode-3 Synchronizer (Huawei ESM-48100B1)
 // Official Huawei Registers (from MaintenanceTool.exe & ModbusModule.dll):
@@ -360,16 +362,19 @@ inline void espnow_broadcast_pack8_summary(EspNowPack8Packet &pkt) {
 //   0x100D: Charge Limit Coef    (RAM, prec=3, unit=C, 1000 = 1.000C = 100A)
 //   0x101B: Default Charge Limit Coef (EEPROM, prec=3, unit=C, 1000 = 100A) - One-time boot unlock
 //   0x000E: Module Mode          (2 = Charge, 3 = Discharge)
-//   0xB798: Intelligent Hybrid Constant-Voltage Mode (0 = Disable, 1 = Enable)
+//   0xB798: Intelligent Hybrid Constant-Voltage Mode (0 = Disable, 1 = Enable; Batch 3+ idx >= 4 only)
 // -----------------------------------------------------------------------------
 inline uint16_t g_eq_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint16_t g_eq_chg_coef[8]   = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint8_t  g_eq_force_mode3[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-inline bool     g_eq_cmd_pending[8] = {true, true, true, true, true, true, true, true};
+inline bool     g_eq_cmd_pending[8] = {false, false, false, false, false, false, false, false};
+inline bool     g_eq_reassert_disch[8] = {false, false, false, false, false, false, false, false};
+inline bool     g_eq_reassert_chg[8] = {false, false, false, false, false, false, false, false};
 inline uint16_t g_eq_last_disch_coef[8] = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
-inline uint16_t g_eq_last_chg_coef[8]   = {0, 0, 0, 0, 0, 0, 0, 0};
+inline uint16_t g_eq_last_chg_coef[8]   = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000};
 inline uint8_t  g_eq_last_mode_sent[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline uint32_t g_eq_last_mode3_ms[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+inline uint8_t  g_eq_wake_attempts[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 inline bool     g_eq_eeprom_unlocked[8] = {false, false, false, false, false, false, false, false};
 inline bool     g_eq_restore_eeprom_pending[8] = {false, false, false, false, false, false, false, false};
 
@@ -377,7 +382,7 @@ template <typename TCtrl, typename TCmdItem>
 inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
   if (idx < 0 || idx >= 8 || ctrl == nullptr) return;
 
-  // 1. Non-Destructive RAM-Only Boot Initialization (100A DCL, 100A CCL, Hybrid=0)
+  // 1. Non-Destructive RAM-Only Boot Initialization (100A DCL, 100A CCL; 0xB798=0 for Batch 3+ idx >= 4)
   //    Never overwrites EEPROM (0x101B) on boot so battery power-cycling cleanly restores factory default!
   if (!g_eq_eeprom_unlocked[idx]) {
     g_eq_eeprom_unlocked[idx] = true;
@@ -387,18 +392,23 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     std::vector<uint16_t> v_dis = {1000};
     auto cmd_dis = TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis);
     ctrl->queue_command(cmd_dis);
+    g_eq_last_disch_coef[idx] = 1000;
 
     // RAM 0x100D: Charge Limit Coef = 1000 (100.0A)
     std::vector<uint16_t> v_chg = {1000};
     auto cmd_chg = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
     ctrl->queue_command(cmd_chg);
+    g_eq_last_chg_coef[idx] = 1000;
 
-    // RAM 0xB798: Intelligent Hybrid Mode = 0 (Disable boost, normal battery mode)
-    std::vector<uint16_t> v_hyb = {0};
-    auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
-    ctrl->queue_command(cmd_hyb);
-
-    ESP_LOGI("bms_auto_init", "Pack %d RAM-only boot unlock sent (0x100B=100A, 0x100D=100A, 0xB798=0; EEPROM untouched)", idx + 1);
+    // RAM 0xB798: Intelligent Hybrid Mode = 0 (Batch 3+ packs idx >= 4 support this register; Batch 1/2 reject with Ex2)
+    if (idx >= 4) {
+      std::vector<uint16_t> v_hyb = {0};
+      auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
+      ctrl->queue_command(cmd_hyb);
+      ESP_LOGI("bms_auto_init", "Pack %d RAM-only boot unlock sent (0x100B=100A, 0x100D=100A, 0xB798=0; EEPROM untouched)", idx + 1);
+    } else {
+      ESP_LOGI("bms_auto_init", "Pack %d RAM-only boot unlock sent (0x100B=100A, 0x100D=100A; EEPROM untouched)", idx + 1);
+    }
   }
 
   // 1b. Optional One-Shot EEPROM Default Restore (0x101B = 500 -> 0.500C / 50A)
@@ -413,55 +423,127 @@ inline void exec_huawei_bms_equalizer_slot(int idx, TCtrl *ctrl) {
     // Keep RAM active at 100A for current operation
     std::vector<uint16_t> v_dis = {1000};
     ctrl->queue_command(TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis));
+    g_eq_last_disch_coef[idx] = 1000;
     std::vector<uint16_t> v_chg = {1000};
     ctrl->queue_command(TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg));
+    g_eq_last_chg_coef[idx] = 1000;
 
     ESP_LOGW("bms_auto_init", "Pack %d EEPROM 0x101B restored to 0.500C (50A) default (RAM kept at 100A)", idx + 1);
   }
 
-  if (!g_eq_cmd_pending[idx]) return;
-  g_eq_cmd_pending[idx] = false;
-
-  ctrl->set_allow_duplicate_commands(true);
-  uint16_t dis_coef = g_eq_disch_coef[idx];
-  uint16_t chg_coef = g_eq_chg_coef[idx];
-  uint8_t force_m3 = g_eq_force_mode3[idx];
-
   // 2. Dynamic Autonomous Equalizer Command (Function Code 0x10)
-  if (dis_coef != g_eq_last_disch_coef[idx]) {
-    g_eq_last_disch_coef[idx] = dis_coef;
-    std::vector<uint16_t> v_dis = {dis_coef};
-    auto cmd_dis10 = TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis);
-    ctrl->queue_command(cmd_dis10);
+  if (g_eq_cmd_pending[idx]) {
+    g_eq_cmd_pending[idx] = false;
+    bool reassert_dis = g_eq_reassert_disch[idx];
+    bool reassert_chg = g_eq_reassert_chg[idx];
+    g_eq_reassert_disch[idx] = false;
+    g_eq_reassert_chg[idx] = false;
+    ctrl->set_allow_duplicate_commands(true);
+    uint16_t dis_coef = g_eq_disch_coef[idx];
+    uint16_t chg_coef = g_eq_chg_coef[idx];
+
+    if (dis_coef != g_eq_last_disch_coef[idx] || reassert_dis) {
+      g_eq_last_disch_coef[idx] = dis_coef;
+      std::vector<uint16_t> v_dis = {dis_coef};
+      auto cmd_dis10 = TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis);
+      ctrl->queue_command(cmd_dis10);
+    }
+
+    if (chg_coef != g_eq_last_chg_coef[idx] || reassert_chg) {
+      g_eq_last_chg_coef[idx] = chg_coef;
+      std::vector<uint16_t> v_chg = {chg_coef};
+      auto cmd_chg10 = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
+      ctrl->queue_command(cmd_chg10);
+    }
   }
 
-  if (chg_coef != g_eq_last_chg_coef[idx]) {
-    g_eq_last_chg_coef[idx] = chg_coef;
-    std::vector<uint16_t> v_chg = {chg_coef};
-    auto cmd_chg10 = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
-    ctrl->queue_command(cmd_chg10);
-  }
-
-  // 4. Mode 3 and Hybrid Boost control (cooldown-guarded retry so stuck Mode-2 packs always wake cleanly)
+  // 3. Wake RAM unlock refresh with monotonic backoff (180s -> 300s -> 600s); preserve last_mode3_ms on exit
+  // Note: Never write 0x000E = 3 on Huawei ESM (all hardware batches reject it with FC 0x10 Exception 2)
   uint32_t now_m = esphome::millis();
-  if (force_m3) {
-    if (g_eq_last_mode_sent[idx] != 3 || g_eq_last_mode3_ms[idx] == 0 || (now_m - g_eq_last_mode3_ms[idx] >= 35000)) {
+  if (g_eq_force_mode3[idx]) {
+    uint32_t cooldown_ms = (g_eq_wake_attempts[idx] == 0) ? 180000UL
+                         : ((g_eq_wake_attempts[idx] == 1) ? 300000UL : 600000UL);
+    if (g_eq_last_mode3_ms[idx] == 0 || (now_m - g_eq_last_mode3_ms[idx] >= cooldown_ms)) {
+      ctrl->set_allow_duplicate_commands(true);
       g_eq_last_mode_sent[idx] = 3;
       g_eq_last_mode3_ms[idx] = now_m;
+      if (g_eq_wake_attempts[idx] < 2) {
+        g_eq_wake_attempts[idx]++;
+      }
 
-      std::vector<uint16_t> v_hyb = {0};
-      auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
-      ctrl->queue_command(cmd_hyb);
+      std::vector<uint16_t> v_dis = {1000};
+      auto cmd_dis = TCmdItem::create_write_multiple_command(ctrl, 0x100B, 1, v_dis);
+      ctrl->queue_command(cmd_dis);
+      g_eq_last_disch_coef[idx] = 1000;
 
-      std::vector<uint16_t> v_m3 = {3};
-      auto cmd_m3 = TCmdItem::create_write_multiple_command(ctrl, 0x000E, 1, v_m3);
-      ctrl->queue_command(cmd_m3);
-      ESP_LOGW("bms_wake", "Pack %d -> Sending Mode 3 wake (0xB798=0, 0x000E=3)", idx + 1);
+      std::vector<uint16_t> v_chg = {1000};
+      auto cmd_chg = TCmdItem::create_write_multiple_command(ctrl, 0x100D, 1, v_chg);
+      ctrl->queue_command(cmd_chg);
+      g_eq_last_chg_coef[idx] = 1000;
+
+      if (idx >= 4) {
+        std::vector<uint16_t> v_hyb = {0};
+        auto cmd_hyb = TCmdItem::create_write_multiple_command(ctrl, 0xB798, 1, v_hyb);
+        ctrl->queue_command(cmd_hyb);
+      }
+
+      ESP_LOGW("bms_wake", "Pack %d -> Wake RAM unlock refresh (0x100B=100A, 0x100D=100A%s; cooldown %lus, attempt %u)",
+               idx + 1, (idx >= 4) ? ", 0xB798=0" : "",
+               (unsigned long)(cooldown_ms / 1000UL), (unsigned)g_eq_wake_attempts[idx]);
     }
   } else {
     g_eq_last_mode_sent[idx] = 0;
-    g_eq_last_mode3_ms[idx] = 0;
+    if (g_eq_last_mode3_ms[idx] != 0 && (now_m - g_eq_last_mode3_ms[idx] >= 600000UL)) {
+      g_eq_wake_attempts[idx] = 0;
+    }
   }
+}
+
+// Deduplicates redundant CAN 0x35F + UDP 18888 commands targeting Pack 8 while allowing epoch re-assertions
+inline bool apply_remote_pack8_cmd(uint8_t fm3, uint16_t dcoef, uint16_t ccoef, const char *src) {
+  bool reassert_dis = false;
+  bool reassert_chg = false;
+  if (fm3 == 0xEE) {
+    g_eq_restore_eeprom_pending[7] = true;
+    fm3 = 0;
+  } else {
+    reassert_dis = (fm3 & 0x02) != 0;
+    reassert_chg = (fm3 & 0x04) != 0;
+    fm3 = ((fm3 & 0x01) != 0) ? 1 : 0;
+  }
+  if (dcoef != 0 && dcoef < 15) dcoef = 15;
+  if (dcoef > 1000) dcoef = 1000;
+  if (ccoef != 0 && ccoef < 20) ccoef = 20;
+  if (ccoef > 1000) ccoef = 1000;
+
+  static uint32_t s_last_reassert_ms = 0;
+  uint32_t now_m = esphome::millis();
+  bool coef_changed = (dcoef != g_eq_disch_coef[7]) || (ccoef != g_eq_chg_coef[7]);
+  bool wake_changed = (fm3 != g_eq_force_mode3[7]);
+  bool allow_reassert = (reassert_dis || reassert_chg) &&
+                        (s_last_reassert_ms == 0 || (uint32_t)(now_m - s_last_reassert_ms) >= 15000UL);
+  if (!coef_changed && !wake_changed && !allow_reassert) {
+    return false;
+  }
+
+  g_eq_disch_coef[7] = dcoef;
+  g_eq_chg_coef[7] = ccoef;
+  g_eq_force_mode3[7] = fm3;
+  if (reassert_dis) {
+    g_eq_reassert_disch[7] = true;
+  }
+  if (reassert_chg) {
+    g_eq_reassert_chg[7] = true;
+  }
+  if (reassert_dis || reassert_chg) {
+    s_last_reassert_ms = now_m;
+  }
+  if (coef_changed || allow_reassert) {
+    g_eq_cmd_pending[7] = true;
+  }
+  ESP_LOGW("auto_equalizer", "%s RX -> Pack 8 slot queued: 0x100B=%u, 0x100D=%u, force_m3=%u%s",
+           src, dcoef, ccoef, fm3, allow_reassert ? " [reassert]" : "");
+  return true;
 }
 
 
