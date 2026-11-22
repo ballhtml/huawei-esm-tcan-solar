@@ -14,7 +14,7 @@
 | **Inverter Bridge (Node 109)** | LilyGO T-CAN485 ESP32 | `192.168.8.109` | Wi-Fi (`Home_Ball`) + MAX3232 RS232 | Inverter Bridge: RS232 to EM11000 Inverter, dynamic CCL/CV clamping, ESP-NOW Failover Backup |
 | **Solar Inverter (EM11000)** | MaxSky EM11000 11kW Dual MPPT | `192.168.8.166` | Wi-Fi Stick (Dessmonitor Logger) | MaxSky 11kW Off-grid / Hybrid Inverter (devcode 6515 / ANENJI / EASun platform, SN: 92B32409100334), RS232 port 9600 8N1, Modbus registers 0x0100..0x0180 |
 | **Home Assistant (HA)** | Green / Server VM | `192.168.8.209` | LAN Port 8123 | HA Core 2026.10.4, `ha-dessmonitor` v2.6.0, Solar Energy Lovelace Dashboard |
-| **Synology NAS (SA6400)** | Intel i5-8400 / 16GB RAM | `192.168.8.158` | LAN DSM Port 5000 / Web IDE 8443 | XPEnology DSM 7.2 (Arc Loader), 24/7 Agent Server, Open WebUI (3000), Transmission (9091) |
+| **Synology NAS (SA6400)** | Intel i5-8400 / B365-PLUS / 16GB RAM | `192.168.8.158` | LAN DSM Port 5000 / Web IDE 8443 | XPEnology DSM 7.2 (Arc Loader), 24/7 Agent Server, Open WebUI (3000), Transmission (9091) |
 | **Workstation PC** | Windows 11 PC | `192.168.8.161` | LAN 2.5G | Local dev station, ESPHome compilation, Antigravity harness |
 
 ### Battery Bank Constraints & Specs (8x Huawei ESM-48100B1)
@@ -24,19 +24,19 @@
   - **CRITICAL AGENT INVARIANT:** NEVER refer to the home ESS as 300 Ah, 3 packs, or 400 Ah in any calculations, sizing, or discussions. Earlier 3-pack and 4-pack references were temporary bench tests during firmware debugging; the live household system is strictly **800 Ah (8x 100 Ah packs)**.
 - **Physical Connection:** All 8 packs permanently connected in parallel to common heavy-duty DC copper busbars.
 - **Geographic Location (Permanent):** จังหวัดเลย (Mueang Loei District, Lat: 17.59768, Lon: 101.71790). Solar forecasts must always query Loei coordinates, NOT Bangkok.
-- **Dual-Version File Standard (Permanent Rule):**
-  - **Set 1 (Production - สำหรับใช้เอง):** `*-prod.yaml` (e.g. `huawei-esm-t-can485-8pack-prod.yaml`, `huawei-esm-tcan-inverter-bridge-prod.yaml`, `cyd-solar-display-prod.yaml`). Fully populated with `Home_Ball` / `99999999` and static IPs (`192.168.8.108`, `109`, `110`). Flashed via `flash_node*.bat` scripts. Protected by `.gitignore`.
-  - **Set 2 (Public / GitHub - สำหรับแจก):** `*.yaml` (e.g. `huawei-esm-t-can485-8pack.yaml`, `huawei-esm-tcan-inverter-bridge.yaml`, `cyd-solar-display.yaml`). Sanitized with `YOUR_WIFI_SSID` / `YOUR_WIFI_PASSWORD`. Safe for open-source publication.
-  - **Rule:** Every modification must be mirrored across both sets. Git operations must never overwrite production files.
-- **Autonomous Equalizer (Node 108):** If Pack 2 discharges > 6.0A while other packs discharge < 2.0A, Node 108 automatically pulses wake frames (0x101B = 100A, 300ms delays) to Packs 1, 3, 4, 5, 6, 7, 8 (cooldown 60s) to eliminate single-pack runaway without user manual intervention.
+- **Three-Tier File Lifecycle Standard (Permanent Rule):**
+  - **Tier 1 — Development (`dev/` — ver dev / ทดสอบแก้ bug):** `dev/*-dev.yaml`, `dev/*.h`, `dev/components_v4/` (uses `Home_Ball` + isolated `*_dev` build paths, ignored by `.gitignore`). All bug fixes, audits, and unverified changes are developed and compiled/tested here first without sharing C++ headers with Production/Public.
+  - **Tier 2 — Production (`*-prod.yaml` — ver ที่ใช้อยู่จริง):** Mirrors the known-good firmware currently running live on household hardware (`Home_Ball` / `99999999` and static IPs `192.168.8.108`, `109`, `110`, ignored by `.gitignore`). **NEVER overwrite `*-prod.yaml` or root C++ with unverified Dev edits** — promote from `dev/` only after live verification and user approval.
+  - **Tier 3 — Public (`*.yaml` — สำหรับแจกบน GitHub):** Clean open-source distribution tracked in git (`YOUR_WIFI_SSID` / `YOUR_WIFI_PASSWORD`). Only update during intentional releases after verification; never commit `*-prod.yaml`, `*-dev.yaml`, or `dev/`.
+- **Autonomous Equalizer (Node 108 - Gen 6 v6.6.0):** Uses `HuaweiSmartBalancer` FSM (`huawei_smart_balancer.h`, 38s epoch sync, SoC-headroom weighted fairness, +5A/epoch stepped release, closed-loop compliance re-assert via `reassert_disch`/`reassert_chg`) across RS485 Packs 1–7 (`exec_huawei_bms_equalizer_slot`) and remote Pack 8 (`CAN 0x35F` + `UDP 18888`). Wake RAM unlock refresh (`0x100B=1000`, `0x100D=1000`, plus `0xB798=0` only for Batch 3+ `idx>=4`) uses 2-epoch Mode != 3 debounce and monotonic `180s -> 300s -> 600s` backoff; never issues `0x000E=3` or cyclical `0x101B` EEPROM writes.
 - **Manual Wake Buttons Policy:** Both wake_pack2_bms / wake_all_bms scripts and buttons on Node 108 are permanently remarked out (#) to prevent accidental manual gate runaway.
 - **Critical Safety Rules:**
   - **NEVER** instruct or require changing DIP switches on active packs without explicit user consent.
   - **Pack 4 Isolation:** Pack 4 hardware address is `214` (`0xD6`). Kept on dedicated isolated RS485 UART channel on Node 108 to eliminate bus collisions with standard IDs (1, 2, 3, 5, 6, 7, 8).
 - **Safety Standby Reserve & Cutoff Floor (Synchronized across Firmware & HA - Nov 2026):**
-  - **Standby Cutoff Floor:** Raised to 25.0% SoC and 48.0V across ESPHome Node 108 & 109 (usable_disch condition) to eliminate sag/surge drops during high-power kitchen spikes.
-  - **HA Usable Reserve Calculation:** sensor.battery_shutdown_soc_setting = 25%, usable formula = (soc - 25) / 100 * total_kwh, emergency reserve = 25% (9.6 kWh out of 38.4 kWh).
-  - **HA Lovelace Cards:** custom:sunsynk-power-flow-card shutdown_soc = 25, custom:solar-bar-card = พร้อมจ่าย (หัก 25% สำรอง), mushroom card = พลังงานพร้อมจ่าย (ถึง 25% สำรอง).
+  - **Standby Cutoff Floor:** Raised to **30.0% SoC** (recover **35.0%**) and 48.0V across ESPHome Node 108 & 109 (`dev/`) to preserve extra backup for long PEA outages and prevent low-voltage Mode-0 BMS sleep/shutdown (`idle_sleep_guard` / `RESERVE_CUTOFF` keepalive keeps `0x100D=1000` awake while preserving `0x100B=0`).
+  - **HA Usable Reserve Calculation:** `sensor.battery_shutdown_soc_setting = 30%`, usable formula = `(soc - 30) / 100 * total_kwh`, emergency reserve = `30%` (`11.52 kWh` out of `38.4 kWh`).
+  - **HA Lovelace Cards:** `custom:sunsynk-power-flow-card` `shutdown_soc = 30`, `custom:solar-bar-card` = `พร้อมจ่าย (หัก 30% สำรอง)`, `shutdown_soc_offgrid = 20`.
 - **Charging & Protection Thresholds:**
   - Float Voltage: 53.5V (~3.56V/cell)
   - Absorption / Max Voltage: 53.8V (~3.58V/cell)
@@ -51,7 +51,8 @@
 
 ## 2. NAS Server & Local AI Infrastructure (`192.168.8.158`)
 
-- **Host Machine:** Intel Core i5-8400 (6 Cores, 2.80GHz - 4.00GHz), 16GB DDR4 RAM, 750W PSU.
+- **Host Machine:** Intel Core i5-8400 (6 Cores, 2.80GHz - 4.00GHz), ASUS PRIME B365-PLUS, 16GB DDR4 RAM, 750W PSU.
+  - **Mainboard Specs (ASUS PRIME B365-PLUS):** 4× DDR4 DIMM (max 64GB, up to 2666 MHz), 1× PCIe 3.0 x16 (CPU x16) + 1× PCIe 3.0 x16 (PCH max x4) + 4× PCIe x1, 2× M.2 (M.2_1 SATA/PCIe x2 + M.2_2 PCIe x4) + 6× SATA 6Gb/s (M.2_1 in SATA mode disables SATA_2), Intel VT-d, Above 4G Decoding, CSM toggle, Resizable BAR (BIOS ≥ 2203).
 - **Operating System:** XPEnology DSM 7.2 (Model: SA6400) booted via Arc Loader.
 - **Container Management:** Synology native **Container Manager** (Docker Compose engine).
 - **Running Services:**
@@ -87,6 +88,7 @@
 ## 4. Smart Home & Network Infrastructure
 
 - **Home Assistant Server:** `192.168.8.209` (HA Core 2026.10.4)
+  - **Config SMB Share:** `\\192.168.8.209\config` — User: `ball` / Password: `ballhtml` (connect via `net use \\192.168.8.209\config /user:ball ballhtml /persistent:yes`)
   - `ha-dessmonitor` v2.6.0: Custom integration polling EM11000 inverter and syncing battery bank states.
   - Lovelace Dashboard: High-density solar cards displaying real-time 8-pack telemetry and 120-cell bar charts.
 - **Xiaomi / Mi Smart Home Ecosystem:**
@@ -168,6 +170,23 @@
 - **Skill Doctor Audit Grade:** Overall A+ (97%) across 47 real sessions (Efficiency 90%, Code Quality 100%, Procedure Compliance 99%, Verbosity 100%, Skill Coverage 100%).
 - **Hardened Rules:** test-driven-builder patched with PowerShell command isolation (no && chaining) and pre-flight module skeleton verification.
 
+### 7.1 Elephant-Goldfish Model (EGM) & NAS Worker Mapping
+- **Origin & Purpose:** Derived from Google's open-source framework and Dave Rensin's architecture (*Elephants, Goldfish, and the New Golden Age of Software Engineering*). Eliminates conversational blind spots, confirmation bias, and unstated assumptions during architecture design.
+- **Role Mapping Across Hardware:**
+  - **🐘 The Elephant (Long-Horizon Planner):** Main Antigravity Session (Main Pro Account). Holds deep project history, user preferences, and system invariants. Brainstorms and drafts formal specifications (`spec.md` / `design_draft.md`) **without writing implementation code**.
+  - **🐟 The Goldfish (Stateless Adversarial Reviewers):** The 4x `agy-worker-1..4` Docker containers running in Arc Container on Synology NAS (`192.168.8.158`) dispatched via `vm_queue.py batch`:
+    - **Zero Context Bleed:** Workers are 100% stateless with zero session memory; they read ONLY the raw `spec.md` and referenced codebase.
+    - **Zero Quota Burn:** Consumes 0% of Main AGY session quota.
+    - **Council of Goldfish (4 Parallel Audit Perspectives):**
+      - *Worker 1 (Comprehension & Flow):* Validates if an outsider can understand and execute the spec without oral tradition.
+      - *Worker 2 (Architecture & Performance):* Audits timing, memory overhead, concurrency, and hardware limits (e.g. CAN/Modbus busload).
+      - *Worker 3 (Security & Fail-safes):* Audits edge-case recovery, state-machine deadlocks, and defensive validation.
+      - *Worker 4 (Blind Spots & Missing Specs):* Identifies unstated assumptions, ambiguous parameters, and test gaps.
+  - **🧑 Human Gatekeeper:** User reviews aggregated findings in `summary.md`, resolves architectural trade-offs (`resolve`), and gives sign-off before coding begins.
+- **Scope of Application:**
+  - **Prime Domains:** Reverse Engineering (REA / protocol analysis / firmware disassembly where confirmation bias is fatal), new multi-module subsystems, and mission-critical hardware controllers (e.g. Huawei R4875G1 CAN charger integration).
+  - **Fast-Track Exemption:** Never enforce EGM on small bug fixes, UI adjustments, or single-line config tweaks (abides by Poteto Mode & The Laziness Protocol).
+
 
 ---
 
@@ -234,7 +253,7 @@
   - Confirmed via powercfg: Sleep = 0 (Never), Hibernate = 0 (Never), Disk Timeout = 0 (Never), Display Timeout = 300s (5 minutes). Machine functions continuously as a 24/7 agent server.
 
 ## 11. Antigravity 24/7 Synology VMM Migration & Staging
-- **Target Infrastructure:** Synology NAS SA6400 (192.168.8.158), Intel Core i5-8400, 16GB RAM.
+- **Target Infrastructure:** Synology NAS SA6400 (192.168.8.158), Intel Core i5-8400, ASUS PRIME B365-PLUS, 16GB RAM.
 - **Migration Objective:** Eliminate workstation dependency so main PC can sleep/turn off; eliminate mobile browser disconnects by replacing Web UI with native Microsoft Remote Desktop (RDP) over UDP/H.264.
 - **Staging Directory on NAS:** \\SA6400\antigravity\vm_setup\
   - utounattend.xml: Automated Windows 11 answer file with hardware bypass (TPM/SecureBoot/RAM/CPU), auto-logon (all), RDP enable, and auto-execution of optimization scripts on first boot.
@@ -360,7 +379,26 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
     - Master 4-Pack Comparison Table: 11 columns wide with zero syllable wrapping.
     - Unified 15-Cell Matrix: 60 cells displayed simultaneously side-by-side with dynamic min (🔻 red bold) and max (🔺 green bold) highlights.
   - **Installed Lovelace Card Dependencies:** `power-flow-card-plus`, `sunsynk-power-flow-card`, `apexcharts-card`, `mushroom`, `sensor-bar-card-plus`, `solar-bar-card`, `lovelace-entity-progress-card`.
+
+### 12.2 Live Benchmark & Baseline Telemetry (Nov 14, 2026)
+- **Live Pack Verified via COM3 (CH340 RS485):**
+  - **Pack Serial Number:** `T32025070200342` (Manufactured July 2, 2025, Unit #342)
+  - **BMS Hardware Barcode:** `0407741052500095Z`
+  - **Firmware Version:** `P15S100A-1918-1.41D` (15S 100A firmware)
+  - **Pack Voltage:** `51.54 V` | **Current:** `0.00 A` (Resting / Standby)
+  - **SOC:** `100.0%` (Remaining Capacity: `99.42 Ah`)
+  - **SOH:** `99.4%` (Full Capacity: `99.42 Ah` / Design: `100.00 Ah`)
+  - **Cycle Count:** `169 Cycles`
+  - **Cell Imbalance (Delta V):** **19 mV** (`Max: 3.427V` / `Min: 3.408V`) — Exceptionally healthy balance!
+  - **Cell Voltages (15S):** `[3.426, 3.425, 3.426, 3.425, 3.427, 3.426, 3.427, 3.425, 3.427, 3.426, 3.426, 3.425, 3.427, 3.425, 3.408]`
+  - **Temperatures:** Cells `27.2 - 27.7°C`, Ambient `27.4 - 28.4°C`, Power MOSFET `30.4°C`.
+  - **Protection / Alarms:** All alarm bits `00000000` (Normal, Alarms cleared, 100% operational).
+  - **BmsTools / DC Control Baseline (`E:\T3 BMS Software\BmsTools.exe`):**
+    - **DC Control Write Password (`txtPwd2`):** `8888888` (unlocks `Set`/`Write` buttons; Anti-theft: `pace123`).
+    - **DC Control Readout (2026-11-14):** Work Mode `Self-managed discharge...`, Discharge Gradient `43.00 V`, Protection Voltage `40.00 V`, Bus Current `100.0 A`, Charging Voltage `53.00 V`, Charging Current `85.0 A`, Discharge/Charge Power `4900 W`, DOD `50%`, Bus Voltage `48.00 V`.
+    - **Peak Shaving / Staggering Function (CID2 `0x25` Write / `0x26` Read):** Defaulted to `NoCHGMode` `18:00-22:00`; requires `8888888` unlock, `Stop Monitor`, `Working Num of periods = 1` with non-empty mode dropdown to disable cleanly.
   - **Pi Authentication:** Long-Lived Access Token preserved in `z:\modbus\scratch\pi_ha_llat.txt`.
+  - **Production Architecture (Nov 15, 2026 — Closed):** Replaced ESP32 RS485 bridge with direct **USB-RS485 (CH340) into Raspberry Pi (`192.168.8.228`)** running native HA custom integration `t3_pace_bms` (`9600 8E1`, `port: auto`, auto-discovery `0–15` + `255`, `scan_interval: 3`, `t3_pace_bms.scan_bus` service, `sensor.t3_bms_debug`). Dashboard deployed to `http://192.168.8.228/t3-battery` and Overview via `z:\modbus\scratch\update_pi_dash.py` (4-card KPI row, Load Sharing table, 4-Pack SOC, 2h ApexCharts, 15S Cell Voltages, RS485 Debug).
 
 ### 12.2 Maxsky 16kW Inverter (Vami VMIO-16.8K48L1) Reverse Engineering & Control Architecture
 - **Target App & Binary Analysis:**
@@ -514,3 +552,117 @@ ecorder: in configuration.yaml (purge_keep_days: 3, uto_purge: true, commit_int
   - Updated `is_high` in `huawei-esm-t-can485-8pack*.yaml` Case B (`auto_equalizer`) by adding `(psoc >= (min_soc + 18.0f))` so morning diversion activates cleanly across mid-SOC banks (e.g., Packs 1–3, 5–8 at `67%–76%` vs Pack 4 at `45%`) whenever spread reaches `>= 18%`, without waiting for `max_soc >= 88%`.
   - Replaced single-point `any_hungry_overvolt` with latched voltage hysteresis `s_caseb_voltage_done` (releases throttling if any hungry pack `>= 53.20V`; re-arms only when `< 51.80V` or `total_i < 2.0A`) to prevent ping-pong.
   - Verified live on `192.168.8.108` & `192.168.8.109:8080` at `09:46`: `Solar Charge Divert: MinSOC=45% MaxSOC=76% HighCap=2.0A`, Packs 1–3/5–8 throttled to `+1.80A–+2.20A`, Pack 4 jumped from `+2.70A` to **`+6.90A` (346 W)** as #1 charging pack (`50.17V`, `4 mV` delta).
+- **PACO & Narada BMS Tool — Unified Protected Release (RS485 & RS232, 2026-11-12 / Updated 2026-11-13):**
+  - **Dedicated Folder:** `Z:\modbus\BMS_Tool_Protected_485_232` (also synced to external drive `E:\BMS_Tool_Protected_485_232`).
+  - **Hardware CDKey Security Guard:** Both `BMS Tool.exe` and `PACO_RS232_Direct_Reader.exe` enforce the same hardware-locked Super Admin CD-Key matching the machine's Hardware SN (`E192-FB59-511C-614E`). Unactivated systems or copied databases to other hardware are blocked from opening either tool.
+  - **1-Click Web UI Integration:** Injected `[ ⚡ เปิด RS232 Direct Reader (Paco/Narada) ]` button inside the Web UI Add Device modal (`chunk-00333faf.6b7b1c89.js`) using `e.$message` (fixed webpack `ELEMENT` undefined bug) that triggers `/common/launch-rs232` on the backend (`CommonController.class`), launching `PACO_RS232_Direct_Reader.exe` instantly without console popups.
+  - **RS232 Protocol & Parser Fixes (`paco_rs232_gui.py`):**
+    - Replaced hardcoded `ver="21", adr=1, info="00"` TX frame with multi-protocol **Auto-Scan** & presets: Narada 1640 (`~22..4A42..01`), PACO/P1363 (`~22..4A42..FF`), ZTE 1104/R311 (`~21..4642..FF`), YD/T 1363 (`20`/`21`/`25`), CID1 `0x42`, Bauds `9600/1200/19200`, and Address selector (`Auto` probing `1,0,2,3,4` or `0..15`).
+    - Rewrote `parse_ascii_response()` + `extract_valid_ascii_frame()` with `LCHKSUM` + 16-bit `CHKSUM` verification, TX-echo/noise skipping (`read_ascii_response_from_port`), `INFOFLAG+M` (`offset=2B`/`1B`/`0B`) prefix detection, YD/T 1363 / Narada 1640 / ZTE `R311` (`cid1=46`, `Standby1`) / `FB100B3` (`SOC`-first) payload parsing, `DTR`/`RTS` assertion on serial open, and Tkinter main-thread `root.after()` log marshalling.
+    - **Live Hardware Verification on COM4 (2026-11-13):** Probed real PACO battery connected via Prolific PL2303GC on `COM4` (9600 bps 8N1). Responds to `~21014642E002FFFD09\r` with `VER=25, CID1=46, RTN=00, LENID=118 (59B)` returning 15S LiFePO4 cells (`C1-C15: 3.380V - 3.511V`), 6 temperature sensors (`28.7°C - 31.6°C`), Voltage `52.11V`, Current `0.00A`, Capacity `101.03 / 101.03 Ah (100.0% SOC)`, Design Capacity `100.00 Ah`, and `19 cycles`. Auto-scaled mV voltage decoding (`>15000 / 1000.0`), recompiled `PACO_RS232_Direct_Reader.exe` and synced to `Z:\modbus\BMS_Tool_Protected_485_232` and `E:\BMS_Tool_Protected_485_232`.
+  - **Paco_Keygen_Admin Fix & Rebuild (`Z:\Paco_Keygen_Admin` & `Z:\modbus`, 2026-11-13):**
+    - **Root Cause:** Legacy `Paco_Keygen_Admin.py` (Nov 1) in `Z:\Paco_Keygen_Admin` stripped all hyphens from input (`sn = sn.strip().replace('-', '')`), converting 16-hex Machine SN `E192-FB59-511C-614E` into `E192FB59511C614E`. When hashed, this generated an invalid key (`3F9C97697347`) instead of the true Super Admin key expected by `CommonUtils.getLocalSN()` (`2F3C97094349`).
+    - **Resolution:** Added `normalize_sn()` to preserve/enforce standard 16-hex `XXXX-XXXX-XXXX-XXXX` format (and 12-hex legacy MAC), hex character validation (`0-9, A-F`), and auto-clipboard copy. Recompiled `Paco_Keygen_Admin.exe` via PyInstaller in `Z:\Paco_Keygen_Admin` (11,092,866 bytes), synced to `Z:\modbus\Paco_Keygen_Admin.exe` and `E:\Paco_Keygen_Admin.exe`, and updated `Z:\Paco_Keygen_Admin.rar`. Verified `E192-FB59-511C-614E` generates `2F3C97094349` identically matching active production database.
+
+### 12.7 Home Assistant EM11000 Grid Power Sync, Li2 Boost & Pack 4 Full Calibration (2026-11-13 / 2026-11-14)
+- **High-Speed Real-Time `grid_power` Synchronization:**
+  - **Issue:** Sunsynk Power Flow Card on Home Assistant (`lovelace.home_energy`) was lagging 60 seconds behind real-time on `grid_power` (polled via cloud `ha-dessmonitor`), while `output_power` and `solar_total_power` updated at 1.5s–3.0s local cadence via `em11000_bridge`. When load or solar shifted, stale `grid_power > essential_power` falsely rendered Grid-to-Battery power flow animations while in Solar-only Bypass.
+  - **Resolution (`em11000_bridge/__init__.py` & `dess_solar/coordinator.py` on `192.168.8.209`):**
+    - Extracted Modbus Register 340 (`Grid Power`, `struct.unpack('>h', mb_d[7:9])[0]`) from existing Block D (`338..353`) query.
+    - Added `"grid_power": int(p_grid)` to `triage_data` dispatched to `dess_solar` coordinator, added target mapping in `_apply_triage_points`, and pushed `_set_sensor_state("sensor.home_energy_em11000_grid_power")` at 3.0s cadence matching `output_power`. Verified synchronized sub-second live state updates.
+- **Pack 4 Deep Calibration & Bank Full 100% Equalization:**
+  - Pack 4 Coulomb counter had drifted down to `26.0%` (despite healthy cells: `3.298V..3.300V`, `2mV` delta).
+  - Executed controlled utility calibration charge using Inverter mode `SNU` + Node 109 `switch.home_energy_inverter_bridge_logger_li2_calibration_boost_53_6v` (temporarily pushing target to 53.6V with cell guard active).
+  - Adjusted `constant_pressure_to_float_waiting_time` from lead-acid 45 min down to LiFePO4-optimal **`15.0 min`**.
+  - Pack 4 cell voltages peaked at `3.512V` (`65mV` delta at top knee), triggering hardware full-charge latch and resetting Pack 4 SoC cleanly from `62.0%` directly to **`100.0%`**.
+  - All 8 packs reached `100.0%` (`99.875%` bank total), followed by automated transition back to `SBU` output priority, `OSO` charger priority, and `Boost = OFF`. Verified smooth 8-pack current sharing on discharge (`-2.42A` on Pack 4, `-0.95A..-3.29A` across bank).
+- **Telecom Infrastructure R&D (Huawei SMU02C & R4875G1 Rectifier Integration):**
+  - **Hardware Inventory:** Bench setup includes **Huawei SMU02C** controller (RJ45 CAN, Ethernet Web/SNMP/Modbus TCP, RS485 `|O|O|`) and **Huawei R4875G1** 4000W / 75A telecom rectifier.
+  - **Addressing & Identity Invariants (Critical Telecom Knowledge):**
+    - **No Physical DIP Switches:** Huawei ESM-48100B1 has NO manual DIP switches on the chassis; address assignments are dynamically negotiated via `COM_IN` / `COM_OUT` token-ring or software registers.
+    - **Pack 8 Isolated on Node 109:** Pack 8 retains factory default slave address `214` (`0xD6`) with missing/null ESN barcode (`None`/`unknown`). Because official Huawei SMU controllers enforce mandatory ESN registration and reject unregistered/conflicting modules, Pack 8 is isolated on Node 109 Port 2.
+  - **Reverse Engineering & Emulation Strategy:**
+    - Deploy **Huawei SMU02C** in the initial phase as the golden ground-truth master to discover and log the full native CAN command dictionary (`0x1081xxxx` / `0x1080xxxx` framing at 125 kbps) and directly control **R4875G1** under native ecosystem standards.
+    - Sniff all operational sequences: initialization, dynamic current throttling (10A..75A), float/boost voltage switching (53.5V..56.4V), alarm handling, and standby cutoffs.
+    - Port the decoded command engine into an ESP32 emulator (Node 110 T-CAN485), creating a headless virtual SMU capable of standalone R4875G1 control and virtual battery aggregation (bypassing ESN/ID constraints) whenever the physical SMU02C is detached for customer field service.
+
+### 12.9 Gen 6 Release — Smart SoC-Weighted Balancer FSM, Schmitt DCL Stabilizer & Closed-Loop Re-Assert (2026-11-15)
+- **Live Versions Deployed & Verified:**
+  - Node 108 (`192.168.8.108` / `huawei-esm-t-can485-8pack*.yaml`): **`v6.6.0`** (`970288` bytes OTA, `safe_mode` verified)
+  - Node 109 (`192.168.8.109` / `huawei-esm-tcan-inverter-bridge*.yaml`): **`v1.4.0`** (`1009152` bytes OTA, `safe_mode` & `ota.espidf` verified)
+  - Pylontech LI2 Engine (`components_v4/pylontech_emulator/pylontech_emulator.h`): **`v6.6.0-PRO`**
+- **Backups & Rollback Paths (Preserved Untouched):**
+  - **Pre-Gen6 Working Rollback (`v5.5.0`):** `Z:\modbus\backups\v5.5.0_20261110_1458\` (`tcanesm_firmware.ota.bin`, `tcan-inverter-bridge_firmware.bin`)
+  - **Pre-OTA Gen6 Snapshot:** `Z:\modbus\backups\gen6_20261115_pre_ota\`
+  - **Verified Live Gen6 Archive:** `Z:\modbus\backups\gen6_20261115_verified\` (includes verified `.ota.bin` + `.elf`, `components_v4/`, `tests/`, headers, and YAMLs)
+- **Key Fixes & Live Runtime Discoveries Applied:**
+  - **Explicit Finite State Machines (`huawei_smart_balancer.h`):**
+    - `HuaweiSmartBalancer`: 35s boot settle + 38s polling-epoch synchronized FSM (`NORMAL_OPEN`, `DISCH_THROTTLED`, `DISCH_RELEASING`, `CHG_DIVERTING`, `RESERVE_CUTOFF`) using SoC-headroom weighted fairness, +5A/epoch stepped release (28A snap to 100A), high-SoC helper tolerance (`allow_limit_a >= 18A`, `desired_cap_a >= 14A` when `sleeping_m2 == 0`), and 2-epoch wake debounce.
+    - `PylontechDclStabilizer`: Schmitt triggers (`dv_tier_`, `cd_tier_` `12A/17A` enter vs `8.5A/13A` exit, `surge_active_`) + 10s upward recovery dwell eliminating contactor/relay chatter and keeping `g_li2_throttling_reason` atomic with `limit_100ma`.
+  - **Audit Hardening Applied & Verified Live:**
+    - Replaced `0x000E = 3` writes in `exec_huawei_bms_equalizer_slot()` (`tcan_telemetry_shared.h`) with RAM unlock refresh (`0x100B=1000`, `0x100D=1000`, `0xB798=0` only for Batch 3+ `idx >= 4`) under `180s -> 300s -> 600s` monotonic backoff (0 `Exception 2` errors live).
+    - Demoted `Inverter RX` `ESP_LOGI` to `ESP_LOGV` in `pylontech_emulator.h` (eliminated `132-142ms` component stall warnings on Node 109), raised charge current imbalance threshold (`chg_curr_delta >= 22.0f`, `pi >= 0.5f`), and synced `last_chg_guard_mask_` across 16-pack telemetry.
+    - Added 8-iteration `UDP 18888` RX drain loop, CAN freshness gate on `0xAA 0x55` publish, `std::isfinite` guards on Pack 8 RX, and an extra `1000ms` settle guard before `modbus_polling_loop` on Node 108.
+    - **Closed-Loop Compliance Watchdog (Caught Live):** Added `reassert_disch` / `reassert_chg` flags (`huawei_smart_balancer.h`) + CAN `0x35F` / UDP `18888` bitflags (`0x02`/`0x04`) with 15s twin-packet deduplication (`apply_remote_pack8_cmd` in `tcan_telemetry_shared.h`) so any pack exceeding its active limit by `>= 3.5A` (e.g., after peer Node 109 reboot resets Pack 8 RAM `0x100B=1000`) automatically re-asserts on the next 38s epoch.
+- **Final Live Verification (2026-11-15 20:37–20:39, 85s boot + 15s steady state):**
+  - Node 108: `800.0 Ah` (all 8/8 packs online in Mode `3.0`), total `-37.98A @ 49.29V` (`67.25%` SoC), balanced currents `-2.92A` to `-6.83A` across Packs 1–8 (`P1=-5.06A`, `P2=-5.81A`, `P3=-5.04A`, `P4=-4.33A`, `P5=-4.84A`, `P6=-3.15A`, `P7=-2.92A`, `P8=-6.83A`), `0` steady-state warnings/errors.
+  - Node 109: `101` CID2 `0x61/0x63` responses & `86` CAN RX in 85s, `DISCHARGE_NORMAL (250A)`, `CCL=120A`, `CV=53.6V`, `0` warnings/`0` errors.
+
+### 12.10 Discharge Hogging Prevention & Dynamic Fair-Share Balancer Tuning (2026-11-18)
+- **Problem:** During evening SBU discharge (~33A-36A household load), Pack 7 hogged up to `-28.8A` initially and `-14.2A` continuously (~39% of bank load) due to lowest physical path impedance, while Pack 1 (70% SoC) only supplied `-2.5A`.
+- **Root Cause Isolated:**
+  1. `is_high_helper` evaluated `soc >= min_usable_soc + 4.0%`. With Pack 4 at 55%, Pack 7 at 59% was misclassified as a "high helper" and given an excessive 14A cap floor (`desired_cap_a = std::max(14.0f, ...)`).
+  2. `heavy_imbalance` required `active_disch_packs <= 3`, which prevented imbalance clamping when all 8 packs were active.
+- **Fix Applied & OTA Deployed to Node 108 (`huawei_smart_balancer.h`):**
+  1. `is_high_helper` now strictly requires `soc >= max_usable_soc - 3.0%` (only true top packs helper-boost).
+  2. `is_low_soc_hog` dynamically flags any pack with `soc <= max_usable_soc - 5.0%` drawing `>= max(6.0A, fair * 1.25f)`.
+  3. Dynamic Fair-Share Caps: Clamped cap reduced from 14.0A down to `std::max(6.0f, weighted_fair_a * 1.05f)`.
+  4. Broadened `heavy_imbalance` to `abs_total_a >= 18.0A && disch_a >= 8.0A && disch_a >= weighted_fair_a * 1.45f` regardless of active pack count.
+- **Live Empirical Telemetry Verified:**
+  - Pack 7 current dropped from **`-14.2 A`** down to **`-1.91 A`** (SoC 58%).
+  - Remaining 33A load smoothly shared across bank: Pack 1 (`-3.87A`, 70%), Pack 2 (`-5.57A`, 62%), Pack 3 (`-4.54A`, 65%), Pack 4 (`-3.90A`, 55%), Pack 5 (`-4.09A`, 60%), Pack 6 (`-5.28A`, 62%), Pack 8 (`-3.79A`, 62%). All 8 packs active and balanced.
+
+### 12.11 Full Firmware Audit, Hardening & Three-Tier Isolation (`Dev` / `Prod` / `Public`, 2026-11-18, Dev OTA Verified Live)
+- **Three-Tier Separation Applied (Per User Workflow Correction):**
+  - **Tier 1 — Isolated Dev (`dev/` — ver dev / awaiting OTA test):** Holds all audit & bug-fix code in [dev/](file:///z:/modbus/dev/) (`dev/huawei-esm-t-can485-8pack-dev.yaml`, `dev/huawei-esm-tcan-inverter-bridge-dev.yaml`, `dev/huawei_smart_balancer.h`, `dev/tcan_telemetry_shared.h`, `dev/components_v4/`), compiled to separate `C:\esphome_build\tcanesm_dev` and `C:\esphome_build\tcan_inverter_bridge_dev`, and ignored by `.gitignore`.
+  - **Tier 2 — Live Production (`*-prod.yaml` — ver ที่ใช้อยู่จริง):** Root `huawei-esm-t-can485-8pack-prod.yaml`, `huawei-esm-tcan-inverter-bridge-prod.yaml`, `tcan_telemetry_shared.h`, and `components_v4/` restored to `f6468d3` (`v6.6.0` / `v1.4.0`), with root `huawei_smart_balancer.h` retaining ONLY the verified 19:08 Pack-7 balancer tuning (`Section 12.10`) so `*-prod.yaml` matches live household hardware.
+  - **Tier 3 — Public Git (`*.yaml`):** Restored to clean `f6468d3` baseline (`YOUR_WIFI_SSID` / `YOUR_WIFI_PASSWORD`); never overwritten by unverified Dev edits.
+  - Updated [GEMINI.md](file:///z:/modbus/GEMINI.md), [.gitignore](file:///z:/modbus/.gitignore), `PROJECT_MEMORY.md` Top Rule, and [tests/test_huawei_smart_balancer.py](file:///z:/modbus/tests/test_huawei_smart_balancer.py) to enforce Three-Tier isolation (`Dev -> Live Test -> Promote Prod -> Release Public`).
+- **Root-Cause Audit Fixes Contained in `dev/` (Before Flash):**
+  1. **`dev/huawei_smart_balancer.h`:** Fixed `PylontechDclStabilizer::evaluate()` upward dwell skip on emergency/knee transitions and `const char*` pointer comparison (now `std::strcmp`); added 2-epoch `low_cur_epochs` release debounce (`pulling_fair_share`) to stop throttled pack sawtooth hunting; added `hungry_clamped` / `unthrottled_clamped` charge re-assert; lowered `kChgMinCoef` from `30` (`3.0A`) to `10` (`1.0A`) for effective morning low-sun charge diversion; included `<cstring>`.
+  2. **`dev/tcan_telemetry_shared.h`:** Added FreeRTOS `portMUX_TYPE` critical sections (`g_tcan_pkt_mux` / `g_espnow_mux`) + atomic snapshot/accessor helpers; set `O_NONBLOCK` on UDP TX sockets & `SO_REUSEADDR` on RX `5006`; added `preserve_pack8` parameter to `poll_tcan_bms_receiver()`; lowered remote `ccoef` floor in `apply_remote_pack8_cmd()` from `20` to `10` (`1.0A`); fixed Step 3 wake refresh clobbering throttled `g_eq_disch_coef`/`g_eq_chg_coef` with `1000`; fixed `apply_remote_pack8_cmd(0xEE)` early return; removed unused `#include "huawei_smart_balancer.h"` that broke CYD compilation.
+  3. **`dev/components_v4/pylontech_emulator/pylontech_emulator.h`:** Fixed initial `g_li2_throttling_reason` (`NORMAL_BULK (120A)`), required BOTH voltage & SOC in `is_bms_data_fresh()` with safe `50.0f` fallback, tightened auto-cal latch (`soc >= 95.0f && (min_cell == 0 || min_cell >= 3380)`), enforced strict hex validation in `process_frame()`, gated stale pack cells & clamped `uint16_t` capacity at `65535` in `0x42`, and rounded `0x61` SOC.
+  4. **`dev/components_v4/sd_logger/sd_logger.h`:** Added recursive FreeRTOS `sd_mutex_` (`SdLockGuard`), `SO_RCVTIMEO`/`SO_SNDTIMEO` client socket timeouts, VFS-safe bounded `clean_old_logs(31, 90)` at mount + hourly `clean_old_logs(31, 35)`, strict daily CSV filename validation + `"rb"` mode, atomic `read_tcan_pkt_snapshot()`, local Pack 8 table visibility, accurate `120A/250A` Derating badge & `>=45%/49.8V` cutoff text, and shared `tx_buf` HTML rendering.
+  5. **`dev/*-dev.yaml` (Node 108 & Node 109 Bridge):** Fixed uninitialized ESP-NOW on intervals, strict `0x35F` header magic + `<=100%` bounds, atomic Pack 8 snapshot writes + wake script limit preservation + `p8_pkt.seq++`, Node 108 CAN `0x358` range gate + `std::isfinite` on UDP casts + 38s Pack 8 heartbeat re-sync + 8-byte CAN `0x35F` wake + UDP `18888` EEPROM fallback + `30000ms` Pack 8 energy freshness + bounded `1000ms`/`retries: 1` Modbus polling.
+- **Verification (Post-Separation, Pre-Flash):**
+  - `python -m unittest discover z:\modbus\tests -v`: **10/10 OK** (`0.135s`) covering both Root (`Prod`/`Public`) and `dev/`.
+  - `esphome compile dev/huawei-esm-t-can485-8pack-dev.yaml`: **SUCCESS** (`219.98s`, clean build in `C:\esphome_build\tcanesm_dev`, Flash `970751B / 52.9%`, RAM `77264B / 23.6%`).
+  - `esphome compile dev/huawei-esm-tcan-inverter-bridge-dev.yaml`: **SUCCESS** (`209.91s`, clean build in `C:\esphome_build\tcan_inverter_bridge_dev`, Flash `1010623B / 55.1%`, RAM `54600B / 16.7%`).
+  - `esphome compile huawei-esm-t-can485-8pack-prod.yaml`: **SUCCESS** (`27.29s`, 0 warnings, Flash `969747B / 52.8%`, RAM `77248B / 23.6%`).
+  - `esphome compile huawei-esm-tcan-inverter-bridge-prod.yaml`: **SUCCESS** (`23.73s`, 0 warnings, Flash `1008751B / 55.0%`, RAM `54576B / 16.7%`).
+  - **Live Hardware OTA Verification (2026-11-18 20:21–20:25, Flashed from `dev/`):**
+    - **Node 109 Bridge (`192.168.8.109`):** OTA uploaded `1,011,024 B` in `3.97s`, `0` `[E]` log errors, SD `/sdcard/20261118.csv` FAT32 mounted (`MOUNTED (OK)`), Pylontech Li2 queries running (`query_count=223..242+`), auto-recovered cleanly from temporary imbalance derate to `DISCHARGE_NORMAL (250A)` (`Chg 120A / Dis 250A`, `53.60V`).
+    - **Node 108 (`192.168.8.108`):** OTA uploaded `971,152 B` in `3.91s`, `0` `[E]` log errors, all **8/8 Packs (`800 Ah`)** online in Mode `3`. SmartBalancer caught peak Pack 2 surge (`-30.76A` @ `-63.1A` total) -> clamped Pack 2 down to `-2.90A` while sharing load smoothly across all 8 packs (`P1 -3.90A`, `P2 -2.90A`, `P3 -5.10A`, `P4 -7.50A`, `P5 -3.20A`, `P6 -3.20A`, `P7 -4.60A`, `P8 -3.30A`).
+    - **HTTP Dashboard (`http://192.168.8.109:8080/` & `/log.csv`):** HTTP `200`, false `Derating` badge eliminated (`🟢 ปกติ (พร้อมใช้งาน) | Limit: Chg 120A / Dis 250A`), all 8 packs displayed cleanly, `/log.csv` download verified (`HTTP 200`).
+    - **Lifecycle Status:** Running `dev/` build live for field soak testing; `*-prod.yaml` and Public `*.yaml` remain safely isolated at baseline until user explicitly approves promoting `Dev -> Prod -> Public`.
+
+
+### 12.12 Home Assistant PEA Billing Calibration & Dynamic Cycle Upgrade (2026-11-20)
+- **PEA Electricity Bill 11/2569 Verification & Calibration:**
+  - Official Bill: Cycle 11/2569 (reading date 19/11/2569 at 10:14) = **378.00 units, 1,358.63 THB**.
+  - Previous Bill: Cycle 10/2569 = **351.00 units, 1,233.81 THB**.
+  - Exact formula match verified down to 0.00 THB:
+    - Base energy: 1-200u @ 3.0000, 201-400u @ 4.1584, >400u @ 4.3583
+    - Svc: 24.62 THB
+    - Ft: 0.1623 THB/u
+    - Discount (Veteran G1 50 units): 156.42 THB (or u * 3.1284 if u < 50)
+    - Subtotal + 7% VAT
+    - 378 units: Base (1,340.20) + Ft (61.35) + Svc (24.62) - Disc (156.42) = 1,269.75 + VAT 88.88 = **1,358.63 THB** (Exact match).
+    - 351 units: Base (1,227.92) + Ft (56.97) + Svc (24.62) - Disc (156.42) = 1,153.09 + VAT 80.72 = **1,233.81 THB** (Exact match).
+- **Billing Cycle Cutover & Dynamic Date Upgrade:**
+  - Investigated user concern that billing cycle hadn't cut: Verified sensor.grid_energy_billing_cycle in core.restore_state did reset automatically at midnight 20/11 00:00 (last_reset: 2026-11-19T17:00:00Z, last_period: 351.182, new cycle starting at 1.959 units).
+  - The appearance of not cutting was purely due to hardcoded text (20 ต.ค. - วันนี้) in the Lovelace card.
+  - Upgraded //192.168.8.209/config/.storage/lovelace.home_energy and ha_dashboard_solar_battery_8pack.yaml with dynamic Jinja date template (cur_cycle_label / prev_cycle_label). When 
+ow().day >= 20, it automatically flips to (20 พ.ย. - วันนี้) and records previous period as (20 ต.ค. - 19 พ.ย.).
+  - Added dedicated **'รอบบิลที่แล้ว'** row to the Lovelace ledger table displaying last_period metrics: Grid imported (351.2 units / ฿1,234.65), Solar+Battery offset savings (412.0 units / ฿1,854.04), House total consumption (763.2 units / ฿3,434.36), and Solar generation (531.6 units).
+  - Updated grid_cost_last_billing_cycle fallback in both home_assistant/configuration.yaml and //192.168.8.209/config/configuration.yaml from 1233.81 to 1358.63.
