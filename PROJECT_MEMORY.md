@@ -176,6 +176,7 @@
   - **All-in-One Slash Commands:** `/auto [task]`, `/all [task]`, `/team-all [task]`, `/egm-full [task]`
   - **All-in-One Thai Phrases:** `"จัดเต็ม [งาน]"`, `"จัดเต็ม... ให้หน่อย"`, `"รุมทำให้จบ..."`, `"รุมทำให้จบ [งาน]"`
   - **Standard Subagent/Swarm Triggers:** `/team [task]`, `/egm [task]`, `/swarm [task]`, `/teamwork [task]`, `"ช่วยกันทำ..."`, `"ช่วยกัน..."`, `"รุมทำ..."`, `"ให้ทีม..."`, `"ทีม..."`
+  - **Folder Audit Offload (Zero Main Context Bloat):** `"ทีม ตรวจโค้ดทั้งโฟลเดอร์นี้หน่อย"`, `"ตรวจโค้ดทั้งโฟลเดอร์..."`, `"ตรวจทั้งโปรเจกต์..."` (Sharded across 4x NAS workers; Main reads only `summary.md`)
 - **Role Mapping Across Hardware (Autonomous 4-Phase Pipeline):**
   - **Phase 1 — 🐘 The Elephant (Long-Horizon Planner):** Main Antigravity Session (Main Pro Account). Holds deep project history, user preferences, and system invariants. Brainstorms and drafts formal specifications (`spec.md` / `design_draft.md`) **without writing implementation code**.
   - **Phase 2 — 🐟 The Goldfish (Stateless Adversarial Reviewers):** The 4x `agy-worker-1..4` Docker containers running in Arc Container on Synology NAS (`192.168.8.158`) dispatched via `vm_queue.py batch`:
