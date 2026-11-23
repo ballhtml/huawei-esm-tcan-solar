@@ -170,11 +170,15 @@
 - **Skill Doctor Audit Grade:** Overall A+ (97%) across 47 real sessions (Efficiency 90%, Code Quality 100%, Procedure Compliance 99%, Verbosity 100%, Skill Coverage 100%).
 - **Hardened Rules:** test-driven-builder patched with PowerShell command isolation (no && chaining) and pre-flight module skeleton verification.
 
-### 7.1 Elephant-Goldfish Model (EGM) & NAS Worker Mapping
+### 7.1 Elephant-Goldfish Model (EGM), Multi-Agent Teamwork & Master Trigger Mapping
 - **Origin & Purpose:** Derived from Google's open-source framework and Dave Rensin's architecture (*Elephants, Goldfish, and the New Golden Age of Software Engineering*). Eliminates conversational blind spots, confirmation bias, and unstated assumptions during architecture design.
-- **Role Mapping Across Hardware:**
-  - **🐘 The Elephant (Long-Horizon Planner):** Main Antigravity Session (Main Pro Account). Holds deep project history, user preferences, and system invariants. Brainstorms and drafts formal specifications (`spec.md` / `design_draft.md`) **without writing implementation code**.
-  - **🐟 The Goldfish (Stateless Adversarial Reviewers):** The 4x `agy-worker-1..4` Docker containers running in Arc Container on Synology NAS (`192.168.8.158`) dispatched via `vm_queue.py batch`:
+- **Master Unified Triggers (All-in-One Autonomous Execution):**
+  - **All-in-One Slash Commands:** `/auto [task]`, `/all [task]`, `/team-all [task]`, `/egm-full [task]`
+  - **All-in-One Thai Phrases:** `"จัดเต็ม [งาน]"`, `"จัดเต็ม... ให้หน่อย"`, `"รุมทำให้จบ..."`, `"รุมทำให้จบ [งาน]"`
+  - **Standard Subagent/Swarm Triggers:** `/team [task]`, `/egm [task]`, `/swarm [task]`, `/teamwork [task]`, `"ช่วยกันทำ..."`, `"ช่วยกัน..."`, `"รุมทำ..."`
+- **Role Mapping Across Hardware (Autonomous 4-Phase Pipeline):**
+  - **Phase 1 — 🐘 The Elephant (Long-Horizon Planner):** Main Antigravity Session (Main Pro Account). Holds deep project history, user preferences, and system invariants. Brainstorms and drafts formal specifications (`spec.md` / `design_draft.md`) **without writing implementation code**.
+  - **Phase 2 — 🐟 The Goldfish (Stateless Adversarial Reviewers):** The 4x `agy-worker-1..4` Docker containers running in Arc Container on Synology NAS (`192.168.8.158`) dispatched via `vm_queue.py batch`:
     - **Zero Context Bleed:** Workers are 100% stateless with zero session memory; they read ONLY the raw `spec.md` and referenced codebase.
     - **Zero Quota Burn:** Consumes 0% of Main AGY session quota.
     - **Council of Goldfish (4 Parallel Audit Perspectives):**
@@ -182,7 +186,8 @@
       - *Worker 2 (Architecture & Performance):* Audits timing, memory overhead, concurrency, and hardware limits (e.g. CAN/Modbus busload).
       - *Worker 3 (Security & Fail-safes):* Audits edge-case recovery, state-machine deadlocks, and defensive validation.
       - *Worker 4 (Blind Spots & Missing Specs):* Identifies unstated assumptions, ambiguous parameters, and test gaps.
-  - **🧑 Human Gatekeeper:** User reviews aggregated findings in `summary.md`, resolves architectural trade-offs (`resolve`), and gives sign-off before coding begins.
+  - **Phase 3 — ⚡ Swarm Parallel Implementation:** Workers on NAS divide module implementation and unit test construction across 4 parallel threads.
+  - **Phase 4 — 🧑‍✈️ Lead Quality Gatekeeper & Delivery:** Main agent aggregates diffs from `summary.md`, verifies test evidence, checks safety invariants, and delivers complete result to user.
 - **Scope of Application:**
   - **Prime Domains:** Reverse Engineering (REA / protocol analysis / firmware disassembly where confirmation bias is fatal), new multi-module subsystems, and mission-critical hardware controllers (e.g. Huawei R4875G1 CAN charger integration).
   - **Fast-Track Exemption:** Never enforce EGM on small bug fixes, UI adjustments, or single-line config tweaks (abides by Poteto Mode & The Laziness Protocol).
