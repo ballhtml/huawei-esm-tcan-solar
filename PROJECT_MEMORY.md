@@ -174,7 +174,11 @@
 - **Origin & Purpose:** Derived from Google's open-source framework and Dave Rensin's architecture (*Elephants, Goldfish, and the New Golden Age of Software Engineering*). Eliminates conversational blind spots, confirmation bias, and unstated assumptions during architecture design.
 - **Master Unified Pipeline (`/auto` / `จัดเต็ม`):**
   - **Single Umbrella Command:** `/auto [task]` หรือ `"จัดเต็ม [งาน]"` (รวมงานวิเคราะห์, ตรวจโค้ดทั้งโฟลเดอร์, วางสเปก EGM, เขียนโค้ด, และเทส ครบจบในคำเดียว)
-  - **Built-in Zero-Token Invariant:** แชตหลักห้ามดูดไฟล์โค้ดทั้งโฟลเดอร์หรือ log ยาวๆ เข้าแชตเด็ดขาด โดยจะส่งรายชื่อไฟล์ไปให้ `agy-worker-1..4` บน NAS Docker อ่านตรงจากดิสก์ (`/workspace/...`) ทันที แชตหลักอ่านเฉพาะ `summary.md` เท่านั้น (Zero Main Context Bloat)
+  - **Built-in Zero-Token Invariant & Tooling Suite:**
+    - แชตหลักห้ามดูดไฟล์โค้ดทั้งโฟลเดอร์หรือ log ยาวๆ เข้าแชตเด็ดขาด โดยจะส่งรายชื่อไฟล์ไปให้ `agy-worker-1..4` บน NAS Docker อ่านตรงจากดิสก์ (`/workspace/...`) ทันที แชตหลักอ่านเฉพาะ `summary.md` เท่านั้น (Zero Main Context Bloat)
+    - **Code Compression (Repomix + Tree-sitter):** ใช้ `repomix_compress.py` สกัดเฉพาะ AST signatures (ตัด comments, empty lines, function bodies) ลดโทเคนลง >80% ก่อนส่งเข้าโมเดล
+    - **Clean Web Ingestion (Defuddle):** ใช้ `defuddle_clean.py` คลีนหน้าเว็บ/Datasheet/ฟอรัม ตัด ad/nav เหลือ Markdown ล้วน ป้องกันบริบทบวม
+    - **Visual Architecture (JSON Canvas 1.0):** ใช้ `canvas_builder.py` สร้างไดอะแกรม `.canvas` แบบแม่นยำ ไม่ต้องร่าง JSON ด้วยมือ
   - **Aliases:** `/team`, `/all`, `/swarm`, `/egm`, `"ทีม..."`, `"ให้ทีม..."`, `"ช่วยกัน..."`, `"รุมทำให้จบ..."` ทั้งหมดวิ่งเข้า Master Pipeline เดียวกันนี้โดยอัตโนมัติ ไม่มีการแยกคำสั่งซ้ำซ้อน
 - **Role Mapping Across Hardware (Autonomous 4-Phase Pipeline):**
   - **Phase 1 — 🐘 The Elephant (Long-Horizon Planner):** Main Antigravity Session (Main Pro Account). Holds deep project history, user preferences, and system invariants. Brainstorms and drafts formal specifications (`spec.md` / `design_draft.md`) **without writing implementation code**.
