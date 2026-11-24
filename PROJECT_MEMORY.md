@@ -196,6 +196,12 @@
 - **Scope of Application:**
   - **Prime Domains:** Reverse Engineering (REA / protocol analysis / firmware disassembly where confirmation bias is fatal), new multi-module subsystems, and mission-critical hardware controllers (e.g. Huawei R4875G1 CAN charger integration).
   - **Fast-Track Exemption:** Never enforce EGM on small bug fixes, UI adjustments, or single-line config tweaks (abides by Poteto Mode & The Laziness Protocol).
+- **3-Tier Operational Infrastructure & Usage Playbook (Verified Nov 2026):**
+  - **Tier 1 — Lead (`EQnQ0` Main Pro):** Run `Gemini 4 Hydrogen (Medium)` for routine `/auto` orchestration (`Neon`/`Carbon` only for initial complex specs). Never ingest raw directories; read only `<80`-line `summary.md`.
+  - **Tier 2 — Execution Swarm (`vm_queue.py` $\rightarrow$ 5x NAS Docker `agy-worker-1..5`):** `Y:\arc-container\antigravity-workers` (`network_mode: host`, `hooks.json` patched to `python3`, `python-is-python3` added to `Dockerfile`). Use `"mode": "auto"` when tasks need Bash/tests; omit `"model"` (`Gemini 3.8 Flash`) by default, and reserve `"Claude Sonnet 4.6 (Thinking)"` for max 1 critic worker/batch.
+  - **Tier 3 — Gemini 4 Web Pool (`jo_swarm.py` $\rightarrow$ `free-gemini-api` Go Docker on `192.168.8.158:8001` & `:9226`):** `Y:\workspace\free-gemini-api` (`network_mode: host`, 4 Jo+ accounts: `FAmqE`, `FAl71`, `EQkvj`, `EQmU8`; `w5` & `EQnQ0` strictly excluded). Auto-synced via Edge/Chrome extension `Z:\AI\free-gemini-api\gemini-extension` (`192.168.8.158` prioritized in `tier1`). Route pure analysis/spec reviews to `gemini-4-neon-thinking-medium` via `jo_swarm.py`.
+  - **Zero-Token Helpers (`~/.gemini/config/skills/teamwork/scripts/`):** `repomix_compress.py` (`repomix --compress` >80% AST reduction), `defuddle_clean.py` (clean web Markdown), `canvas_builder.py` (JSON Canvas 1.0 generator).
+  - **Huawei R4875G1 Bench Status (Nov 2026):** 40A 2P AC breaker + 6 sq.mm AC (`L`/`N` silkscreened, `PE` to Ground Bar) + 35 sq.mm DC (`SC35` lugs) wired; awaiting CAN pigtail to run `ESP32` (`125 kbps` Listen-Only sniffer) alongside `SMU02C` to capture live CAN control frames before standalone ESP32 takeover.
 
 
 ---
