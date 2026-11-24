@@ -175,7 +175,7 @@
 - **Master Unified Pipeline (`/auto` / `จัดเต็ม`):**
   - **Single Umbrella Command:** `/auto [task]` หรือ `"จัดเต็ม [งาน]"` (รวมงานวิเคราะห์, ตรวจโค้ดทั้งโฟลเดอร์, วางสเปก EGM, เขียนโค้ด, และเทส ครบจบในคำเดียว)
   - **Built-in Zero-Token Invariant & Tooling Suite:**
-    - แชตหลักห้ามดูดไฟล์โค้ดทั้งโฟลเดอร์หรือ log ยาวๆ เข้าแชตเด็ดขาด โดยจะส่งรายชื่อไฟล์ไปให้ `agy-worker-1..4` บน NAS Docker อ่านตรงจากดิสก์ (`/workspace/...`) ทันที แชตหลักอ่านเฉพาะ `summary.md` เท่านั้น (Zero Main Context Bloat)
+    - แชตหลักห้ามดูดไฟล์โค้ดทั้งโฟลเดอร์หรือ log ยาวๆ เข้าแชตเด็ดขาด โดยจะส่งรายชื่อไฟล์ไปให้ `agy-worker-1..5` บน NAS Docker อ่านตรงจากดิสก์ (`/workspace/...`) ทันที แชตหลักอ่านเฉพาะ `summary.md` เท่านั้น (Zero Main Context Bloat)
     - **Code Compression (Repomix + Tree-sitter):** ใช้ `repomix_compress.py` สกัดเฉพาะ AST signatures (ตัด comments, empty lines, function bodies) ลดโทเคนลง >80% ก่อนส่งเข้าโมเดล
     - **Clean Web Ingestion (Defuddle):** ใช้ `defuddle_clean.py` คลีนหน้าเว็บ/Datasheet/ฟอรัม ตัด ad/nav เหลือ Markdown ล้วน ป้องกันบริบทบวม
     - **Visual Architecture (JSON Canvas 1.0):** ใช้ `canvas_builder.py` สร้างไดอะแกรม `.canvas` แบบแม่นยำ ไม่ต้องร่าง JSON ด้วยมือ
